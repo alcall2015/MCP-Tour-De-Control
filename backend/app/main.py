@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import config as config_router
 from app.routers import mcp_servers as mcp_servers_router
+from app.routers import prompts as prompts_router
+from app.routers import scripts as scripts_router
 
 structlog.configure(
     processors=[
@@ -35,6 +37,8 @@ app.add_middleware(
 
 app.include_router(config_router.router)
 app.include_router(mcp_servers_router.router)
+app.include_router(prompts_router.router)
+app.include_router(scripts_router.router)
 
 
 @app.get("/health")

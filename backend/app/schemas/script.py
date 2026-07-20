@@ -10,7 +10,7 @@ class ScriptRead(BaseModel):
     version: int
     code: str
     needs_llm: bool
-    llm_steps: dict | None
+    llm_steps: list | dict | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
