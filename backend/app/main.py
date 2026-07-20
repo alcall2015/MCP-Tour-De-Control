@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import config as config_router
+from app.routers import executions as executions_router
 from app.routers import mcp_servers as mcp_servers_router
 from app.routers import prompts as prompts_router
 from app.routers import scripts as scripts_router
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(config_router.router)
+app.include_router(executions_router.router)
 app.include_router(mcp_servers_router.router)
 app.include_router(prompts_router.router)
 app.include_router(scripts_router.router)
