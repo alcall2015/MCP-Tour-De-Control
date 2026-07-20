@@ -4,6 +4,9 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routers import config as config_router
+from app.routers import mcp_servers as mcp_servers_router
+
 structlog.configure(
     processors=[
         structlog.stdlib.add_log_level,
@@ -29,6 +32,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(config_router.router)
+app.include_router(mcp_servers_router.router)
 
 
 @app.get("/health")
