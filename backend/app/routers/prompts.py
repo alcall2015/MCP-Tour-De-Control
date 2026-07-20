@@ -11,6 +11,7 @@ from app.models import Config, McpServer, Prompt, Script
 from app.schemas import PromptCreate, PromptRead, PromptUpdate, ScriptRead
 from app.services.llm_service import LlmService
 from app.services.mcp_service import McpService
+from app.services.scheduler_service import scheduler_service
 from app.utils.crypto import decrypt_value
 
 log = structlog.get_logger()
@@ -92,6 +93,10 @@ async def create_prompt(data: PromptCreate, session: AsyncSession = Depends(get_
         log.error("Script generation failed", prompt_id=str(prompt.id), error=str(e))
         # Prompt is saved, but no script — user can retry via regenerate
 
+    # Schedule cron job if cron_expr is set and prompt is enabled
+    if prompt.cron_expr and prompt.enabled:
+        scheduler_service.add_job(prompt.id, prompt.cron_expr)
+
     return PromptRead(
         id=prompt.id, name=prompt.name, description=prompt.description,
         prompt_text=prompt.prompt_text, cron_expr=prompt.cron_expr,
@@ -124,10 +129,19 @@ async def update_prompt(prompt_id: uuid.UUID, data: PromptUpdate, session: Async
     prompt = await session.get(Prompt, prompt_id)
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
+    old_cron_expr = prompt.cron_expr
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(prompt, field, value)
     await session.commit()
     await session.refresh(prompt)
+
+    # If cron_expr changed, reschedule or add job
+    if data.cron_expr is not None and data.cron_expr != old_cron_expr:
+        if prompt.cron_expr and prompt.enabled:
+            scheduler_service.reschedule_job(prompt.id, prompt.cron_expr)
+        elif not prompt.cron_expr:
+            scheduler_service.remove_job(prompt.id)
+
     return PromptRead(
         id=prompt.id, name=prompt.name, description=prompt.description,
         prompt_text=prompt.prompt_text, cron_expr=prompt.cron_expr,
@@ -142,6 +156,7 @@ async def delete_prompt(prompt_id: uuid.UUID, session: AsyncSession = Depends(ge
     prompt = await session.get(Prompt, prompt_id)
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
+    scheduler_service.remove_job(prompt_id)
     await session.delete(prompt)
     await session.commit()
 
@@ -154,6 +169,14 @@ async def toggle_prompt(prompt_id: uuid.UUID, session: AsyncSession = Depends(ge
     prompt.enabled = not prompt.enabled
     await session.commit()
     await session.refresh(prompt)
+
+    # Pause or resume cron job based on new enabled state
+    if prompt.cron_expr:
+        if prompt.enabled:
+            scheduler_service.resume_job(prompt.id)
+        else:
+            scheduler_service.pause_job(prompt.id)
+
     return PromptRead(
         id=prompt.id, name=prompt.name, description=prompt.description,
         prompt_text=prompt.prompt_text, cron_expr=prompt.cron_expr,
