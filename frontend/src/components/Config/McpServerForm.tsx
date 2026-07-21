@@ -26,16 +26,19 @@ export function McpServerForm({ initial, onSubmit, onCancel }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-3 rounded border border-zinc-700 bg-zinc-800 p-4">
+    <form
+      onSubmit={handleSubmit}
+      className="card-elevated p-4 space-y-3"
+    >
       <input
         required
         placeholder="Server name"
-        className="rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
+        className="input-field"
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
       <select
-        className="rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
+        className="input-field"
         value={transport}
         onChange={(e) => setTransport(e.target.value)}
       >
@@ -47,13 +50,13 @@ export function McpServerForm({ initial, onSubmit, onCancel }: Props) {
           <input
             required
             placeholder="Command (e.g. python)"
-            className="rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
+            className="input-field font-mono"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
           />
           <input
             placeholder="Args (space-separated, e.g. server.py --port 8080)"
-            className="rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
+            className="input-field font-mono"
             value={args}
             onChange={(e) => setArgs(e.target.value)}
           />
@@ -62,16 +65,20 @@ export function McpServerForm({ initial, onSubmit, onCancel }: Props) {
         <input
           required
           placeholder="URL (e.g. http://localhost:8080/mcp)"
-          className="rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-white"
+          className="input-field font-mono"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
         />
       )}
-      <div className="flex gap-2">
-        <button type="submit" className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700">
+      <div className="flex gap-2 pt-1">
+        <button type="submit" className="btn-primary text-xs px-3 py-1.5">
           Save
         </button>
-        <button type="button" onClick={onCancel} className="rounded bg-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-600">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="btn-secondary text-xs px-3 py-1.5"
+        >
           Cancel
         </button>
       </div>

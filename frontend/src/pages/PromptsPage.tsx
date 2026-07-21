@@ -19,21 +19,44 @@ export function PromptsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Prompts</h2>
+        <div className="flex items-center gap-3">
+          <span
+            className="h-5 w-1 rounded-full flex-shrink-0"
+            style={{ backgroundColor: "var(--accent)" }}
+          />
+          <h2
+            className="text-2xl font-semibold"
+            style={{
+              fontFamily: "'Space Grotesk', system-ui, sans-serif",
+              color: "var(--text-primary)",
+            }}
+          >
+            Prompts
+          </h2>
+        </div>
         {!showForm && (
           <button
             onClick={() => setShowForm(true)}
-            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="btn-primary"
           >
             + New Prompt
           </button>
         )}
       </div>
+
       {createMut.isError && (
-        <div className="rounded border border-red-700 bg-red-900/20 px-4 py-3 text-sm text-red-400">
+        <div
+          className="rounded-xl px-4 py-3 text-sm"
+          style={{
+            backgroundColor: "rgba(248, 113, 113, 0.1)",
+            border: "1px solid rgba(248, 113, 113, 0.25)",
+            color: "var(--error)",
+          }}
+        >
           Error: {createMut.error?.message}
         </div>
       )}
+
       {showForm && (
         <PromptForm
           onSubmit={(data) => createMut.mutate(data)}

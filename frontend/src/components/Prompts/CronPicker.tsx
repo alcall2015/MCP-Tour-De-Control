@@ -28,36 +28,50 @@ export function CronPicker({ value, onChange }: Props) {
 
   return (
     <div>
-      <label className="mb-1 block text-sm text-zinc-400">Schedule (cron)</label>
+      <label
+        className="mb-1.5 block text-xs font-medium uppercase tracking-wider"
+        style={{ color: "var(--text-muted)" }}
+      >
+        Schedule (cron)
+      </label>
       {!custom ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            {PRESETS.map((p) => (
+        <div className="flex flex-wrap gap-2">
+          {PRESETS.map((p) => {
+            const isSelected = value === p.value;
+            return (
               <button
                 key={p.value}
                 type="button"
                 onClick={() => onChange(p.value)}
-                className={`rounded px-3 py-1 text-xs ${
-                  value === p.value ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
-                }`}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150"
+                style={{
+                  backgroundColor: isSelected ? "var(--accent)" : "var(--bg-elevated)",
+                  color: isSelected ? "#080b12" : "var(--text-secondary)",
+                  border: `1px solid ${isSelected ? "var(--accent)" : "var(--border)"}`,
+                }}
               >
                 {p.label}
               </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setCustom(true)}
-              className="rounded bg-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-600"
-            >
-              Custom...
-            </button>
-          </div>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setCustom(true)}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150"
+            style={{
+              backgroundColor: "var(--bg-elevated)",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            Custom...
+          </button>
         </div>
       ) : (
         <div className="space-y-2">
           <input
             type="text"
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-white"
+            className="input-field font-mono"
             placeholder="0 8 * * *"
             value={value}
             onChange={(e) => onChange(e.target.value)}
@@ -65,13 +79,25 @@ export function CronPicker({ value, onChange }: Props) {
           <button
             type="button"
             onClick={() => setCustom(false)}
-            className="rounded bg-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-600"
+            className="rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-150"
+            style={{
+              backgroundColor: "var(--bg-elevated)",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border)",
+            }}
           >
-            Use presets
+            ← Use presets
           </button>
         </div>
       )}
-      {value && <p className="mt-1 text-xs text-zinc-500">{humanReadable}</p>}
+      {value && (
+        <p
+          className="mt-1.5 text-xs"
+          style={{ color: "var(--accent)", opacity: 0.8 }}
+        >
+          {humanReadable}
+        </p>
+      )}
     </div>
   );
 }

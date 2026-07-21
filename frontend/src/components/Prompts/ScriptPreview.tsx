@@ -12,21 +12,54 @@ interface Props {
 
 export function ScriptPreview({ code, version, needsLlm }: Props) {
   return (
-    <div className="rounded border border-zinc-700">
-      <div className="flex items-center justify-between border-b border-zinc-700 bg-zinc-800 px-4 py-2">
-        <span className="text-sm font-medium">Script v{version}</span>
+    <div
+      className="overflow-hidden rounded-xl"
+      style={{ border: "1px solid var(--border)" }}
+    >
+      {/* Header bar */}
+      <div
+        className="flex items-center justify-between px-4 py-2.5"
+        style={{
+          backgroundColor: "var(--bg-elevated)",
+          borderBottom: "1px solid var(--border)",
+        }}
+      >
         <span
-          className={`rounded px-2 py-0.5 text-xs ${
-            needsLlm ? "bg-amber-900 text-amber-300" : "bg-green-900 text-green-300"
-          }`}
+          className="text-xs font-semibold font-mono"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          script.py · v{version}
+        </span>
+        <span
+          className="badge"
+          style={
+            needsLlm
+              ? {
+                  backgroundColor: "rgba(251, 191, 36, 0.12)",
+                  color: "var(--warning)",
+                  border: "1px solid rgba(251, 191, 36, 0.25)",
+                }
+              : {
+                  backgroundColor: "rgba(52, 211, 153, 0.1)",
+                  color: "var(--success)",
+                  border: "1px solid rgba(52, 211, 153, 0.2)",
+                }
+          }
         >
           {needsLlm ? "Uses LLM at runtime" : "No LLM needed"}
         </span>
       </div>
+
       <SyntaxHighlighter
         language="python"
         style={atomOneDark}
-        customStyle={{ margin: 0, padding: "1rem", background: "#18181b" }}
+        customStyle={{
+          margin: 0,
+          padding: "1rem",
+          background: "#0f1320",
+          fontSize: "0.8125rem",
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+        }}
       >
         {code}
       </SyntaxHighlighter>

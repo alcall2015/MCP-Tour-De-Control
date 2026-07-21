@@ -10,7 +10,10 @@ interface Props {
 }
 
 export function PromptForm({ onSubmit, onCancel }: Props) {
-  const { data: servers = [] } = useQuery({ queryKey: ["mcp-servers"], queryFn: listMcpServers });
+  const { data: servers = [] } = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: listMcpServers,
+  });
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [promptText, setPromptText] = useState("");
@@ -37,71 +40,134 @@ export function PromptForm({ onSubmit, onCancel }: Props) {
   const enabledServers = servers.filter((s) => s.enabled);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-zinc-700 bg-zinc-900 p-6">
+    <form
+      onSubmit={handleSubmit}
+      className="card p-6 space-y-5"
+    >
+      <h3
+        className="text-base font-semibold mb-1"
+        style={{
+          fontFamily: "'Space Grotesk', system-ui, sans-serif",
+          color: "var(--text-primary)",
+        }}
+      >
+        New Prompt
+      </h3>
+
       <div>
-        <label className="mb-1 block text-sm text-zinc-400">Name</label>
+        <label
+          className="mb-1.5 block text-xs font-medium uppercase tracking-wider"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Name
+        </label>
         <input
           required
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          placeholder="My prompt"
+          className="input-field"
+          placeholder="My automation prompt"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
       </div>
+
       <div>
-        <label className="mb-1 block text-sm text-zinc-400">Description</label>
+        <label
+          className="mb-1.5 block text-xs font-medium uppercase tracking-wider"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Description
+        </label>
         <input
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="input-field"
           placeholder="Optional description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
       </div>
+
       <div>
-        <label className="mb-1 block text-sm text-zinc-400">Prompt</label>
+        <label
+          className="mb-1.5 block text-xs font-medium uppercase tracking-wider"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Prompt
+        </label>
         <textarea
           required
           rows={4}
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="input-field"
           placeholder="Describe what the script should do..."
           value={promptText}
           onChange={(e) => setPromptText(e.target.value)}
         />
       </div>
+
       <CronPicker value={cronExpr} onChange={setCronExpr} />
+
       <div>
-        <label className="mb-1 block text-sm text-zinc-400">MCP Servers to use</label>
+        <label
+          className="mb-1.5 block text-xs font-medium uppercase tracking-wider"
+          style={{ color: "var(--text-muted)" }}
+        >
+          MCP Servers to use
+        </label>
         {enabledServers.length === 0 ? (
-          <p className="text-sm text-zinc-500">No servers configured. Go to Config tab first.</p>
+          <p
+            className="text-sm rounded-lg px-3 py-2"
+            style={{
+              color: "var(--text-muted)",
+              backgroundColor: "var(--bg-elevated)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            No servers configured. Go to the Config tab first.
+          </p>
         ) : (
           <div className="space-y-2">
-            {enabledServers.map((server) => (
-              <label key={server.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selectedServers.includes(server.id)}
-                  onChange={() => toggleServer(server.id)}
-                  className="rounded"
-                />
-                <span className="text-white">{server.name}</span>
-                <span className="text-xs text-zinc-500">({server.transport})</span>
-              </label>
-            ))}
+            {enabledServers.map((server) => {
+              const checked = selectedServers.includes(server.id);
+              return (
+                <label
+                  key={server.id}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors duration-150"
+                  style={{
+                    backgroundColor: checked ? "rgba(226, 179, 64, 0.08)" : "var(--bg-elevated)",
+                    border: `1px solid ${checked ? "rgba(226, 179, 64, 0.3)" : "var(--border)"}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleServer(server.id)}
+                    className="rounded"
+                    style={{ accentColor: "var(--accent)" }}
+                  />
+                  <span style={{ color: "var(--text-primary)" }}>{server.name}</span>
+                  <span
+                    className="font-mono text-xs"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {server.transport}
+                  </span>
+                </label>
+              );
+            })}
           </div>
         )}
       </div>
-      <div className="flex gap-2">
+
+      <div className="flex gap-2 pt-1">
         <button
           type="submit"
           disabled={selectedServers.length === 0}
-          className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+          className="btn-primary"
         >
           Create & Generate Script
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded bg-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-600"
+          className="btn-secondary"
         >
           Cancel
         </button>
