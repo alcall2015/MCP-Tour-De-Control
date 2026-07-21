@@ -3,15 +3,33 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getConfig, updateConfig } from "../../lib/api";
 import { Spinner } from "../ui/Spinner";
 
+const DEFAULT_MODELS: Record<string, { model: string; placeholder: string }> = {
+  openai: { model: "gpt-4", placeholder: "sk-..." },
+  anthropic: { model: "claude-sonnet-4-20250514", placeholder: "sk-ant-..." },
+  google: { model: "gemini-2.0-flash", placeholder: "AIza..." },
+};
+
 export function LlmConfig() {
   const queryClient = useQueryClient();
   const { data: config, isLoading } = useQuery({
     queryKey: ["config"],
     queryFn: getConfig,
   });
-  const [provider, setProvider] = useState("");
-  const [model, setModel] = useState("");
+  const [provider, setProvider] = useState<string | null>(null);
+  const [model, setModel] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
+
+  const activeProvider = provider ?? config?.llm_provider ?? "openai";
+
+  const handleProviderChange = (newProvider: string) => {
+    setProvider(newProvider);
+    // Auto-fill default model when switching provider
+    if (newProvider !== (config?.llm_provider ?? "openai")) {
+      setModel(DEFAULT_MODELS[newProvider]?.model ?? "");
+    } else {
+      setModel(null); // Reset to config value
+    }
+  };
 
   const mutation = useMutation({
     mutationFn: updateConfig,
@@ -23,8 +41,8 @@ export function LlmConfig() {
 
   const handleSave = () => {
     mutation.mutate({
-      llm_provider: provider || undefined,
-      llm_model: model || undefined,
+      llm_provider: provider ?? config?.llm_provider ?? undefined,
+      llm_model: model ?? config?.llm_model ?? undefined,
       api_key: apiKey || undefined,
     });
   };
@@ -59,8 +77,8 @@ export function LlmConfig() {
             </label>
             <select
               className="input-field"
-              value={provider || config?.llm_provider || ""}
-              onChange={(e) => setProvider(e.target.value)}
+              value={activeProvider}
+              onChange={(e) => handleProviderChange(e.target.value)}
             >
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
@@ -78,8 +96,8 @@ export function LlmConfig() {
             <input
               type="text"
               className="input-field font-mono"
-              placeholder={config?.llm_model || "gpt-4"}
-              value={model}
+              placeholder={DEFAULT_MODELS[activeProvider]?.model ?? "model name"}
+              value={model ?? config?.llm_model ?? ""}
               onChange={(e) => setModel(e.target.value)}
             />
           </div>
@@ -99,7 +117,7 @@ export function LlmConfig() {
             <input
               type="password"
               className="input-field font-mono"
-              placeholder="sk-..."
+              placeholder={DEFAULT_MODELS[activeProvider]?.placeholder ?? "api key"}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
