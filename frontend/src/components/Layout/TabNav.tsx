@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { listPrompts, listMcpServers } from "../../lib/api";
 
 const tabs = [
-  { to: "/", label: "Prompts", icon: "⚡" },
-  { to: "/reports", label: "Reports", icon: "📊" },
-  { to: "/config", label: "Config", icon: "⚙" },
+  { to: "/", label: "Prompts" },
+  { to: "/reports", label: "Reports" },
+  { to: "/config", label: "Config" },
 ];
 
 function StatusStrip() {
@@ -95,7 +95,6 @@ export function TabNav() {
                   marginBottom: "-1px",
                 })}
               >
-                <span style={{ fontSize: "0.9rem" }}>{tab.icon}</span>
                 {tab.label}
               </NavLink>
             ))}
