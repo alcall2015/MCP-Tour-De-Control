@@ -1,7 +1,7 @@
 import json
 
 
-def build_generation_prompt(user_prompt: str, mcp_servers: list[dict]) -> str:
+def build_generation_prompt(user_prompt: str, mcp_servers: list[dict], llm_provider: str = "openai") -> str:
     servers_section = ""
     if mcp_servers:
         for server in mcp_servers:
@@ -29,17 +29,41 @@ Generate a Python script that accomplishes the following task:
 1. Use `fastmcp.Client` to connect to MCP servers. For stdio transport:
    ```python
    from fastmcp import Client
-   async with Client("stdio", command="<command>", args=[...]) as client:
+   from fastmcp.client.transports import StdioTransport
+   transport = StdioTransport(command="<command>", args=[...])
+   async with Client(transport) as client:
+       result = await client.call_tool("<tool_name>", {{"arg": "value"}})
+   ```
+   For http transport:
+   ```python
+   from fastmcp import Client
+   async with Client("<url>") as client:
        result = await client.call_tool("<tool_name>", {{"arg": "value"}})
    ```
 
-2. If a step requires reasoning (summarization, analysis, classification), use the LLM API:
+2. If a step requires reasoning (summarization, analysis, classification), use the LLM API.
+   The current LLM provider is: {llm_provider}
+
+   For provider "openai" or "anthropic", use the OpenAI-compatible API:
    ```python
    import os
    from openai import OpenAI
    llm = OpenAI(api_key=os.environ["LLM_API_KEY"])
+   response = llm.chat.completions.create(model=os.environ["LLM_MODEL"], messages=[...])
    ```
-   Read the provider from `os.environ["LLM_PROVIDER"]` and model from `os.environ["LLM_MODEL"]`.
+
+   For provider "google", use the Google GenAI SDK:
+   ```python
+   import os
+   import google.generativeai as genai
+   genai.configure(api_key=os.environ["LLM_API_KEY"])
+   model = genai.GenerativeModel(os.environ["LLM_MODEL"])
+   response = model.generate_content("your prompt here")
+   summary = response.text
+   # Set tokens = 0 (Google SDK does not return token counts the same way)
+   ```
+
+   IMPORTANT: Use the correct SDK for the current provider "{llm_provider}". Do NOT mix them.
 
 3. For steps that produce deterministic output (filtering, formatting, counting), use pure Python.
 

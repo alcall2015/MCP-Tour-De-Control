@@ -32,7 +32,7 @@ class ScriptExecutor:
 
         try:
             process = await asyncio.create_subprocess_exec(
-                "python3.13", "-c", script.code,
+                "python", "-c", script.code,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,

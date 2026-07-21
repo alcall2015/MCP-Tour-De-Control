@@ -19,7 +19,7 @@ class LlmService:
         llm_provider: str,
         llm_model: str,
     ) -> tuple[str, bool, list]:
-        system_prompt = build_generation_prompt(prompt_text, mcp_servers_info)
+        system_prompt = build_generation_prompt(prompt_text, mcp_servers_info, llm_provider=llm_provider)
 
         if llm_provider == "openai":
             client = OpenAI(api_key=api_key)
