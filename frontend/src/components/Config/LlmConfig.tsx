@@ -64,6 +64,7 @@ export function LlmConfig() {
             >
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
+              <option value="google">Google Gemini</option>
             </select>
           </div>
 

@@ -7,7 +7,7 @@ from app.utils.prompt_builder import build_generation_prompt
 
 log = structlog.get_logger()
 
-LLM_USAGE_MARKERS = ["LLM_API_KEY", "OpenAI(", "Anthropic(", "chat.completions.create"]
+LLM_USAGE_MARKERS = ["LLM_API_KEY", "OpenAI(", "Anthropic(", "chat.completions.create", "genai.GenerativeModel", "google.generativeai"]
 
 
 class LlmService:
@@ -42,6 +42,15 @@ class LlmService:
                 messages=[{"role": "user", "content": prompt_text}],
             )
             code = response.content[0].text.strip()
+        elif llm_provider == "google":
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(llm_model)
+            response = model.generate_content(
+                f"{system_prompt}\n\n---\n\nUser request: {prompt_text}",
+                generation_config=genai.types.GenerationConfig(temperature=0.2),
+            )
+            code = response.text.strip()
         else:
             raise ValueError(f"Unsupported LLM provider: {llm_provider}")
 
@@ -72,12 +81,19 @@ class LlmService:
                     temperature=0.1,
                 )
                 code = response.choices[0].message.content.strip()
-                if code.startswith("```python"):
-                    code = code[len("```python"):].strip()
-                if code.startswith("```"):
-                    code = code[3:].strip()
-                if code.endswith("```"):
-                    code = code[:-3].strip()
+            elif llm_provider == "google":
+                import google.generativeai as genai
+                response = model.generate_content(
+                    f"{system_prompt}\n\n---\n\nUser request: {prompt_text}\n\nPrevious attempt:\n{code}\n\n{retry_msg}",
+                    generation_config=genai.types.GenerationConfig(temperature=0.1),
+                )
+                code = response.text.strip()
+            if code.startswith("```python"):
+                code = code[len("```python"):].strip()
+            if code.startswith("```"):
+                code = code[3:].strip()
+            if code.endswith("```"):
+                code = code[:-3].strip()
             ast.parse(code)  # If still invalid, let it raise
 
         # Detect if script uses LLM at runtime
