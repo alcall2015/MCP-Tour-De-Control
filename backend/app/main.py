@@ -41,14 +41,20 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.error("Failed to restore cron jobs from DB", error=str(exc))
 
-    # Auto-register sipp-stress MCP server
+    # Auto-register or update sipp-stress MCP server
     try:
         async with async_session() as session:
             from app.config import settings as app_settings
             result = await session.execute(
                 select(McpServer).where(McpServer.name == "sipp-stress")
             )
-            if not result.scalar_one_or_none():
+            existing = result.scalar_one_or_none()
+            if existing:
+                if existing.url != app_settings.SIPP_MCP_URL:
+                    existing.url = app_settings.SIPP_MCP_URL
+                    await session.commit()
+                    log.info("Updated sipp-stress MCP server URL", url=app_settings.SIPP_MCP_URL)
+            else:
                 sipp_server = McpServer(
                     name="sipp-stress",
                     transport="http",
