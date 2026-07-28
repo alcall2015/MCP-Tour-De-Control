@@ -25,7 +25,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://mcp:mcp_secret@postgres:5432/mcp_control
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-B2d8zbySL4aG5LeprF4bM9x1qn0FB7t7V66_AHKXHGQ=}
-      SIPP_MCP_URL: http://localhost:9090/mcp
+      SIPP_MCP_URL: http://host.docker.internal:9090/mcp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: >
       sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
