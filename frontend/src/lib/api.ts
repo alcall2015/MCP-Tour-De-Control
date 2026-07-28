@@ -62,6 +62,23 @@ export const getExecution = (id: string) => request<Execution>(`/executions/${id
 export const listPromptExecutions = (promptId: string) =>
   request<Execution[]>(`/prompts/${promptId}/executions`);
 
+// Stress Tests
+export const listStressTests = () => request<StressTest[]>("/stress-tests");
+export const createStressTest = (data: StressTestCreate) =>
+  request<StressTest>("/stress-tests", { method: "POST", body: JSON.stringify(data) });
+export const getStressTest = (id: string) => request<StressTest>(`/stress-tests/${id}`);
+export const deleteStressTest = (id: string) =>
+  request<void>(`/stress-tests/${id}`, { method: "DELETE" });
+export const stopStressTest = (id: string) =>
+  request<StressTest>(`/stress-tests/${id}/stop`, { method: "POST" });
+export const getStressMetrics = (id: string) =>
+  request<StressTestMetrics[]>(`/stress-tests/${id}/metrics`);
+export const getStressMetricsLatest = (id: string) =>
+  request<StressTestMetrics | null>(`/stress-tests/${id}/metrics/latest`);
+export const compareStressTests = (testIds: string[]) =>
+  request<StressTest[]>("/stress-tests/compare", { method: "POST", body: JSON.stringify({ test_ids: testIds }) });
+export const listScenarios = () => request<ScenarioInfo[]>("/stress-tests/scenarios");
+
 // Types
 export interface Config {
   id: string;
@@ -147,4 +164,79 @@ export interface Execution {
   duration_ms: number | null;
   prompt_name: string | null;
   script_version: number | null;
+}
+
+// Stress Tests
+export interface StressTestMetrics {
+  id: string;
+  stress_test_id: string;
+  total_calls: number;
+  successful_calls: number;
+  failed_calls: number;
+  asr_percent: number;
+  pdd_avg_ms: number;
+  pdd_p95_ms: number;
+  setup_time_avg_ms: number;
+  cps_achieved: number;
+  retransmissions: number;
+  failed_by_code: Record<string, number> | null;
+  packets_sent: number;
+  packets_received: number;
+  packet_loss_pct: number;
+  jitter_avg_ms: number;
+  jitter_max_ms: number;
+  rtt_avg_ms: number;
+  rtt_max_ms: number;
+  mos_score: number;
+  out_of_order: number;
+  throughput_kbps: number;
+  duration_seconds: number;
+  max_concurrent: number;
+  ramp_up_curve: Record<string, unknown>[] | null;
+  collected_at: string;
+}
+
+export interface StressTest {
+  id: string;
+  name: string;
+  scenario: string;
+  target_host: string;
+  target_port: number;
+  transport: string;
+  cps: number;
+  max_calls: number;
+  duration: number;
+  call_duration: number;
+  ramp_up: number;
+  ramp_step: number;
+  caller_id: string;
+  media_type: string;
+  status: string;
+  remote_test_id: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  latest_metrics: StressTestMetrics | null;
+}
+
+export interface StressTestCreate {
+  name: string;
+  scenario?: string;
+  target_host: string;
+  target_port?: number;
+  transport?: string;
+  cps?: number;
+  max_calls?: number;
+  duration?: number;
+  call_duration?: number;
+  ramp_up?: number;
+  ramp_step?: number;
+  caller_id?: string;
+  media_type?: string;
+}
+
+export interface ScenarioInfo {
+  name: string;
+  description: string;
+  type: string;
 }
