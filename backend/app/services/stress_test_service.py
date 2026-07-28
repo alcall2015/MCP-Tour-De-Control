@@ -88,14 +88,16 @@ class StressTestService:
         return test
 
     @staticmethod
-    def _parse_result(result) -> dict:
-        """Defensively parse MCP tool result into a dict."""
-        if hasattr(result, 'content'):
-            return json.loads(result.content[0].text) if result.content else {}
-        elif isinstance(result, dict):
+    def _parse_result(result):
+        """Defensively parse MCP tool result into a dict or list."""
+        if hasattr(result, 'content') and result.content:
+            text = result.content[0].text
+            return json.loads(text)
+        elif isinstance(result, (dict, list)):
+            # Check if it's a list of TextContent-like objects
+            if isinstance(result, list) and result and hasattr(result[0], 'text'):
+                return json.loads(result[0].text)
             return result
-        elif isinstance(result, list):
-            return result[0] if result else {}
         return json.loads(str(result))
 
     @staticmethod
@@ -202,11 +204,10 @@ class StressTestService:
         try:
             async with Client(settings.SIPP_MCP_URL) as client:
                 result = await client.call_tool("list_scenarios", {})
-            if hasattr(result, 'content'):
-                return json.loads(result.content[0].text) if result.content else []
-            elif isinstance(result, list):
-                return result
-            return json.loads(str(result))
+            parsed = StressTestService._parse_result(result)
+            if isinstance(parsed, list):
+                return parsed
+            return []
         except Exception as e:
             log.warning("Failed to get scenarios from MCP", error=str(e))
             return []
