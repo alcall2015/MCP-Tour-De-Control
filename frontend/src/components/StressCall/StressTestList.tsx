@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listStressTests, stopStressTest, deleteStressTest } from "../../lib/api";
 import type { StressTest } from "../../lib/api";
@@ -5,6 +6,7 @@ import { Spinner } from "../ui/Spinner";
 
 interface Props {
   onViewDetail: (test: StressTest) => void;
+  onCompare?: (testIds: string[]) => void;
 }
 
 type StatusKey = "pending" | "running" | "completed" | "failed" | "stopped";
@@ -97,8 +99,9 @@ function formatDate(iso: string | null): string {
   });
 }
 
-export function StressTestList({ onViewDetail }: Props) {
+export function StressTestList({ onViewDetail, onCompare }: Props) {
   const queryClient = useQueryClient();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data: tests = [], isLoading } = useQuery({
     queryKey: ["stress-tests"],
@@ -118,6 +121,22 @@ export function StressTestList({ onViewDetail }: Props) {
     mutationFn: deleteStressTest,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["stress-tests"] }),
   });
+
+  function toggleSelect(id: string, isCompleted: boolean) {
+    if (!isCompleted) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else if (next.size < 3) {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  const completedTests = tests.filter((t) => t.status === "completed");
+  const canCompare = selectedIds.size >= 2 && selectedIds.size <= 3;
 
   if (isLoading) {
     return (
@@ -165,17 +184,63 @@ export function StressTestList({ onViewDetail }: Props) {
 
   return (
     <div className="space-y-3">
+      {/* Compare toolbar — visible when completed tests exist */}
+      {onCompare && completedTests.length >= 2 && (
+        <div
+          className="flex items-center justify-between rounded-xl px-4 py-2.5"
+          style={{
+            backgroundColor: "var(--bg-elevated)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+            {selectedIds.size === 0
+              ? "Select 2–3 completed tests to compare"
+              : `${selectedIds.size} test${selectedIds.size > 1 ? "s" : ""} selected`}
+          </span>
+          <div className="flex gap-2">
+            {selectedIds.size > 0 && (
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="btn-secondary"
+                style={{ fontSize: "0.8125rem", padding: "0.35rem 0.8rem" }}
+              >
+                Clear
+              </button>
+            )}
+            <button
+              onClick={() => canCompare && onCompare(Array.from(selectedIds))}
+              disabled={!canCompare}
+              className="btn-primary"
+              style={{ fontSize: "0.8125rem", padding: "0.35rem 0.8rem" }}
+            >
+              Compare
+            </button>
+          </div>
+        </div>
+      )}
+
       {tests.map((test) => {
         const m = test.latest_metrics;
         const asr = m ? `${m.asr_percent.toFixed(1)}%` : "—";
         const mos = m && m.mos_score > 0 ? m.mos_score.toFixed(2) : "—";
         const cpsAchieved = m ? m.cps_achieved.toFixed(1) : "—";
         const isRunning = test.status === "running";
+        const isCompleted = test.status === "completed";
+        const isSelected = selectedIds.has(test.id);
 
         return (
           <div
             key={test.id}
             className="card"
+            style={
+              isSelected
+                ? {
+                    borderColor: "rgba(226,179,64,0.5)",
+                    boxShadow: "0 0 0 1px rgba(226,179,64,0.2)",
+                  }
+                : undefined
+            }
           >
             {/* Running progress bar accent */}
             {isRunning && (
@@ -193,6 +258,27 @@ export function StressTestList({ onViewDetail }: Props) {
               {/* Left: name + meta */}
               <div className="flex min-w-0 flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Checkbox for completed tests */}
+                  {onCompare && isCompleted && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(test.id, isCompleted)}
+                      title={
+                        !isSelected && selectedIds.size >= 3
+                          ? "Max 3 tests can be compared"
+                          : "Select for comparison"
+                      }
+                      disabled={!isSelected && selectedIds.size >= 3}
+                      style={{
+                        accentColor: "var(--accent)",
+                        width: "0.875rem",
+                        height: "0.875rem",
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
                   <StatusBadge status={test.status} />
                   <span
                     className="font-semibold"

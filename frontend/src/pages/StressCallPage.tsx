@@ -5,13 +5,15 @@ import type { StressTest } from "../lib/api";
 import { StressTestList } from "../components/StressCall/StressTestList";
 import { StressTestForm } from "../components/StressCall/StressTestForm";
 import { StressTestDetail } from "../components/StressCall/StressTestDetail";
+import { StressTestCompare } from "../components/StressCall/StressTestCompare";
 
-type ViewState = "list" | "form" | "detail";
+type ViewState = "list" | "form" | "detail" | "compare";
 
 export function StressCallPage() {
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewState>("list");
   const [selectedTest, setSelectedTest] = useState<StressTest | null>(null);
+  const [compareTestIds, setCompareTestIds] = useState<string[]>([]);
 
   const createMut = useMutation({
     mutationFn: createStressTest,
@@ -24,6 +26,11 @@ export function StressCallPage() {
   const handleViewDetail = (test: StressTest) => {
     setSelectedTest(test);
     setView("detail");
+  };
+
+  const handleCompare = (testIds: string[]) => {
+    setCompareTestIds(testIds);
+    setView("compare");
   };
 
   return (
@@ -46,6 +53,8 @@ export function StressCallPage() {
               ? "New Stress Test"
               : view === "detail"
               ? selectedTest?.name ?? "Test Detail"
+              : view === "compare"
+              ? "Compare Tests"
               : "Stress Call"}
           </h2>
         </div>
@@ -86,7 +95,7 @@ export function StressCallPage() {
 
       {/* Views */}
       {view === "list" && (
-        <StressTestList onViewDetail={handleViewDetail} />
+        <StressTestList onViewDetail={handleViewDetail} onCompare={handleCompare} />
       )}
 
       {view === "form" && (
@@ -100,6 +109,13 @@ export function StressCallPage() {
       {view === "detail" && selectedTest && (
         <StressTestDetail
           testId={selectedTest.id}
+          onBack={() => setView("list")}
+        />
+      )}
+
+      {view === "compare" && (
+        <StressTestCompare
+          testIds={compareTestIds}
           onBack={() => setView("list")}
         />
       )}
