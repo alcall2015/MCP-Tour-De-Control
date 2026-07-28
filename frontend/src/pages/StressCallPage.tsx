@@ -4,6 +4,7 @@ import { createStressTest } from "../lib/api";
 import type { StressTest } from "../lib/api";
 import { StressTestList } from "../components/StressCall/StressTestList";
 import { StressTestForm } from "../components/StressCall/StressTestForm";
+import { StressTestDetail } from "../components/StressCall/StressTestDetail";
 
 type ViewState = "list" | "form" | "detail";
 
@@ -97,34 +98,10 @@ export function StressCallPage() {
       )}
 
       {view === "detail" && selectedTest && (
-        <div
-          className="card p-8 text-center"
-          style={{ color: "var(--text-muted)" }}
-        >
-          <p
-            className="mb-2 text-base font-medium"
-            style={{
-              fontFamily: "'Space Grotesk', system-ui, sans-serif",
-              color: "var(--text-secondary)",
-            }}
-          >
-            Live monitoring for{" "}
-            <span style={{ color: "var(--text-primary)" }}>{selectedTest.name}</span>
-          </p>
-          <p className="text-sm">
-            Detailed metrics and live charts will be available in the next update.
-          </p>
-          <div
-            className="mt-4 inline-block rounded-lg px-3 py-1.5 text-xs font-mono"
-            style={{
-              backgroundColor: "var(--bg-elevated)",
-              border: "1px solid var(--border)",
-              color: "var(--text-muted)",
-            }}
-          >
-            test id: {selectedTest.id}
-          </div>
-        </div>
+        <StressTestDetail
+          testId={selectedTest.id}
+          onBack={() => setView("list")}
+        />
       )}
     </div>
   );
