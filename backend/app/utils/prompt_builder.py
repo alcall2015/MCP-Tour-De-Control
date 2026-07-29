@@ -90,4 +90,14 @@ Generate a Python script that accomplishes the following task:
 
 6. Handle errors gracefully — catch exceptions and include them in the output JSON.
 
+7. IMPORTANT: `client.call_tool()` returns a list of content blocks, NOT an object with `.content`.
+   Always parse tool results like this:
+   ```python
+   result = await client.call_tool("tool_name", {{}})
+   # result is a list of TextContent objects
+   text = result[0].text if result else ""
+   data = json.loads(text)
+   ```
+   NEVER use `result.content` — use `result[0].text` directly.
+
 Generate ONLY the Python code, no markdown fences, no explanation."""
