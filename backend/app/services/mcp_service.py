@@ -12,7 +12,9 @@ log = structlog.get_logger()
 def _build_http_transport(url: str, api_key_encrypted: str | None = None) -> StreamableHttpTransport:
     headers = {}
     if api_key_encrypted:
-        headers["Authorization"] = f"Bearer {decrypt_value(api_key_encrypted)}"
+        key = decrypt_value(api_key_encrypted)
+        headers["Authorization"] = f"Bearer {key}"
+        headers["X-API-Key"] = key
     return StreamableHttpTransport(url, headers=headers)
 
 
