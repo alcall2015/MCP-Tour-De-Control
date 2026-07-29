@@ -57,6 +57,7 @@ async def create_prompt(data: PromptCreate, session: AsyncSession = Depends(get_
             "command": server.command,
             "args": server.args or [],
             "url": server.url,
+            "has_api_key": bool(server.api_key),
             "tools": tools,
         })
 
@@ -204,7 +205,8 @@ async def regenerate_script(prompt_id: uuid.UUID, session: AsyncSession = Depend
         servers_info.append({
             "name": server.name, "transport": server.transport,
             "command": server.command, "args": server.args or [],
-            "url": server.url, "tools": tools,
+            "url": server.url, "has_api_key": bool(server.api_key),
+            "tools": tools,
         })
 
     api_key = decrypt_value(config.api_key)

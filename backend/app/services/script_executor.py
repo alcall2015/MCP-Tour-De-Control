@@ -7,8 +7,10 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import re
+
 from app.config import settings
-from app.models import Config, Execution, Script
+from app.models import Config, Execution, McpServer, Script
 from app.utils.crypto import decrypt_value
 
 log = structlog.get_logger()
@@ -99,5 +101,13 @@ class ScriptExecutor:
             env["LLM_API_KEY"] = decrypt_value(config.api_key)
             env["LLM_PROVIDER"] = config.llm_provider
             env["LLM_MODEL"] = config.llm_model
+
+        # Inject MCP server API keys as MCP_API_KEY_<SERVER_NAME>
+        servers = (await session.execute(
+            select(McpServer).where(McpServer.api_key.isnot(None))
+        )).scalars().all()
+        for server in servers:
+            env_name = re.sub(r"[^A-Z0-9]", "_", server.name.upper())
+            env[f"MCP_API_KEY_{env_name}"] = decrypt_value(server.api_key)
 
         return env

@@ -10,6 +10,8 @@ def build_generation_prompt(user_prompt: str, mcp_servers: list[dict], llm_provi
                 servers_section += f"Command: {server['command']} {' '.join(server.get('args', []))}\n"
             else:
                 servers_section += f"URL: {server.get('url', 'N/A')}\n"
+                if server.get("has_api_key"):
+                    servers_section += "Authentication: API key required (available in env var `MCP_API_KEY_<SERVER_NAME>`)\n"
             if server.get("tools"):
                 servers_section += "Tools:\n"
                 for tool in server["tools"]:
@@ -34,12 +36,23 @@ Generate a Python script that accomplishes the following task:
    async with Client(transport) as client:
        result = await client.call_tool("<tool_name>", {{"arg": "value"}})
    ```
-   For http transport:
+   For http transport (no auth):
    ```python
    from fastmcp import Client
    async with Client("<url>") as client:
        result = await client.call_tool("<tool_name>", {{"arg": "value"}})
    ```
+   For http transport WITH API key authentication:
+   ```python
+   import os
+   from fastmcp import Client
+   from fastmcp.client.transports import StreamableHttpTransport
+   api_key = os.environ["MCP_API_KEY_<SERVER_NAME>"]
+   transport = StreamableHttpTransport("<url>", headers={{"Authorization": f"Bearer {{api_key}}", "X-API-Key": api_key}})
+   async with Client(transport) as client:
+       result = await client.call_tool("<tool_name>", {{"arg": "value"}})
+   ```
+   IMPORTANT: If a server has "Authentication: API key required", you MUST use StreamableHttpTransport with headers. The env var name is MCP_API_KEY_ followed by the server name in uppercase with non-alphanumeric chars replaced by underscores.
 
 2. If a step requires reasoning (summarization, analysis, classification), use the LLM API.
    The current LLM provider is: {llm_provider}
