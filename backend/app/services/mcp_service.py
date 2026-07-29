@@ -1,11 +1,19 @@
 import structlog
 from fastmcp import Client
-from fastmcp.client.transports import StdioTransport
+from fastmcp.client.transports import StdioTransport, StreamableHttpTransport
 
 from app.models import McpServer
 from app.schemas import McpTestResult, McpToolInfo
+from app.utils.crypto import decrypt_value
 
 log = structlog.get_logger()
+
+
+def _build_http_transport(url: str, api_key_encrypted: str | None = None) -> StreamableHttpTransport:
+    headers = {}
+    if api_key_encrypted:
+        headers["Authorization"] = f"Bearer {decrypt_value(api_key_encrypted)}"
+    return StreamableHttpTransport(url, headers=headers)
 
 
 class McpService:
@@ -36,7 +44,8 @@ class McpService:
             elif server.transport == "http":
                 if not server.url:
                     return McpTestResult(success=False, error="http transport requires a url")
-                async with Client(server.url) as client:
+                transport = _build_http_transport(server.url, server.api_key)
+                async with Client(transport) as client:
                     tools = await client.list_tools()
                     return McpTestResult(
                         success=True,

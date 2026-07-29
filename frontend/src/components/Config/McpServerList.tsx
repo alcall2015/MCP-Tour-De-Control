@@ -103,6 +103,7 @@ export function McpServerList() {
                     command: server.command ?? undefined,
                     args: server.args ?? undefined,
                     url: server.url ?? undefined,
+                    api_key_set: server.api_key_set,
                     enabled: server.enabled,
                   }}
                   onSubmit={(data) => updateMut.mutate({ id: server.id, data })}
@@ -136,6 +137,18 @@ export function McpServerList() {
                       >
                         {server.transport}
                       </span>
+                      {server.api_key_set && (
+                        <span
+                          className="badge font-mono"
+                          style={{
+                            backgroundColor: "rgba(226, 179, 64, 0.1)",
+                            color: "var(--accent)",
+                            border: "1px solid rgba(226, 179, 64, 0.2)",
+                          }}
+                        >
+                          key
+                        </span>
+                      )}
                       <span
                         className="hidden text-xs font-mono sm:block truncate"
                         style={{ color: "var(--text-muted)" }}

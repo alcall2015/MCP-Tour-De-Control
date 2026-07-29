@@ -11,6 +11,7 @@ class McpServerCreate(BaseModel):
     args: list[str] | None = None
     env: dict[str, str] | None = None
     url: str | None = None
+    api_key: str | None = None
     enabled: bool = True
 
 
@@ -22,6 +23,7 @@ class McpServerRead(BaseModel):
     args: list[str] | None
     env: dict[str, str] | None
     url: str | None
+    api_key_set: bool = False
     enabled: bool
     created_at: datetime
 
@@ -35,6 +37,7 @@ class McpServerUpdate(BaseModel):
     args: list[str] | None = None
     env: dict[str, str] | None = None
     url: str | None = None
+    api_key: str | None = None
     enabled: bool | None = None
 
 

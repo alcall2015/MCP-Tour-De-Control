@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { McpServerCreate } from "../../lib/api";
 
 interface Props {
-  initial?: Partial<McpServerCreate>;
+  initial?: Partial<McpServerCreate> & { api_key_set?: boolean };
   onSubmit: (data: McpServerCreate) => void;
   onCancel: () => void;
 }
@@ -13,6 +13,7 @@ export function McpServerForm({ initial, onSubmit, onCancel }: Props) {
   const [command, setCommand] = useState(initial?.command || "");
   const [args, setArgs] = useState(initial?.args?.join(" ") || "");
   const [url, setUrl] = useState(initial?.url || "");
+  const [apiKey, setApiKey] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,6 +23,7 @@ export function McpServerForm({ initial, onSubmit, onCancel }: Props) {
       command: transport === "stdio" ? command : undefined,
       args: transport === "stdio" && args ? args.split(" ") : undefined,
       url: transport === "http" ? url : undefined,
+      api_key: transport === "http" && apiKey ? apiKey : undefined,
     });
   };
 
@@ -62,13 +64,24 @@ export function McpServerForm({ initial, onSubmit, onCancel }: Props) {
           />
         </>
       ) : (
-        <input
-          required
-          placeholder="URL (e.g. http://localhost:8080/mcp)"
-          className="input-field font-mono"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
+        <>
+          <input
+            required
+            placeholder="URL (e.g. http://localhost:8080/mcp)"
+            className="input-field font-mono"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <div className="relative">
+            <input
+              type="password"
+              placeholder={initial?.api_key_set ? "API Key (configured, leave empty to keep)" : "API Key (optional)"}
+              className="input-field font-mono"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+          </div>
+        </>
       )}
       <div className="flex gap-2 pt-1">
         <button type="submit" className="btn-primary text-xs px-3 py-1.5">

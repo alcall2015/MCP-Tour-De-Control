@@ -100,6 +100,7 @@ export interface McpServer {
   args: string[] | null;
   env: Record<string, string> | null;
   url: string | null;
+  api_key_set: boolean;
   enabled: boolean;
   created_at: string;
 }
@@ -110,6 +111,7 @@ export interface McpServerCreate {
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  api_key?: string;
   enabled?: boolean;
 }
 export interface McpToolInfo {
