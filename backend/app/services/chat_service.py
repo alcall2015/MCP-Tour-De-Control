@@ -28,7 +28,7 @@ MAX_HISTORY = 20
 MAX_TOOL_RESULT_LEN = 2000
 
 # Fields not supported by all LLM providers in function calling schemas
-_UNSUPPORTED_SCHEMA_FIELDS = {"default", "additionalProperties", "anyOf"}
+_UNSUPPORTED_SCHEMA_FIELDS = {"default", "additionalProperties", "anyOf", "title"}
 
 
 def _clean_schema(schema: dict) -> dict:
