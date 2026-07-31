@@ -340,12 +340,22 @@ async def _stream_llm(provider, model, api_key, messages, tools, stream_callback
             elif m["role"] == "user":
                 parts.append(f"[User] {m['content']}")
             elif m["role"] == "assistant":
-                if m.get("content"):
+                if m.get("tool_calls"):
+                    for tc in m["tool_calls"]:
+                        fn = tc.get("function", tc)
+                        fn_name = fn.get("name", "unknown")
+                        parts.append(f"[Assistant called tool: {fn_name}]")
+                elif m.get("content"):
                     parts.append(f"[Assistant] {m['content']}")
             elif m["role"] == "tool":
                 fn_name = m.get("tool_call_id", "").replace("call_", "")
-                parts.append(f"[Tool result for {fn_name}] {m['content']}")
+                content = m["content"]
+                if len(content) > MAX_TOOL_RESULT_LEN:
+                    content = content[:MAX_TOOL_RESULT_LEN] + f"\n[truncated, {len(m['content'])} chars total]"
+                parts.append(f"[Tool result for {fn_name}]\n{content}")
         prompt = "\n\n".join(parts)
+        # Instruct the model to use the tool results already provided
+        prompt += "\n\n[System] If you already have tool results above that answer the user's question, use them directly. Do NOT call the same tool again."
 
         response = model_obj.generate_content(prompt, stream=True)
         text = ""
