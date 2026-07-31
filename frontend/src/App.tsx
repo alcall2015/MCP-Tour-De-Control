@@ -5,6 +5,7 @@ import { PromptsPage } from "./pages/PromptsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { ConfigPage } from "./pages/ConfigPage";
 import { StressCallPage } from "./pages/StressCallPage";
+import { ChatPage } from "./pages/ChatPage";
 
 const queryClient = new QueryClient();
 
@@ -17,6 +18,7 @@ export default function App() {
             <Route index element={<PromptsPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="stress-call" element={<StressCallPage />} />
+            <Route path="chat" element={<ChatPage />} />
             <Route path="config" element={<ConfigPage />} />
           </Route>
         </Routes>
