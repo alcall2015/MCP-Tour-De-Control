@@ -27,6 +27,24 @@ Reponds en francais. Sois concis et professionnel."""
 MAX_HISTORY = 20
 MAX_TOOL_RESULT_LEN = 2000
 
+# Fields not supported by all LLM providers in function calling schemas
+_UNSUPPORTED_SCHEMA_FIELDS = {"default", "additionalProperties", "anyOf"}
+
+
+def _clean_schema(schema: dict) -> dict:
+    """Strip fields unsupported by LLM function calling (e.g. Google Gemini rejects 'default')."""
+    cleaned = {}
+    for k, v in schema.items():
+        if k in _UNSUPPORTED_SCHEMA_FIELDS:
+            continue
+        if isinstance(v, dict):
+            cleaned[k] = _clean_schema(v)
+        elif isinstance(v, list):
+            cleaned[k] = [_clean_schema(i) if isinstance(i, dict) else i for i in v]
+        else:
+            cleaned[k] = v
+    return cleaned
+
 
 class ChatService:
 
@@ -58,12 +76,13 @@ class ChatService:
         for server in servers_result.scalars().all():
             server_tools = await McpService.get_server_tools(server)
             for t in server_tools:
+                params = _clean_schema(t.get("input_schema") or {"type": "object", "properties": {}})
                 tool_def = {
                     "type": "function",
                     "function": {
                         "name": t["name"],
                         "description": f"[{server.name}] {t.get('description', '')}",
-                        "parameters": t.get("input_schema") or {"type": "object", "properties": {}},
+                        "parameters": params,
                     },
                 }
                 tools.append(tool_def)
