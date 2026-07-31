@@ -4,6 +4,7 @@ from app.schemas.prompt import PromptCreate, PromptRead, PromptUpdate
 from app.schemas.script import ScriptRead
 from app.schemas.execution import ExecutionRead, ExecutionListParams
 from app.schemas.stress_test import StressTestCreate, StressTestRead, StressTestMetricsRead, StressTestCompareRequest, ScenarioInfo
+from app.schemas.chat import ConversationRead, ChatMessageRead, ChatMessageCreate
 
 __all__ = [
     "ConfigRead", "ConfigUpdate",
@@ -12,4 +13,5 @@ __all__ = [
     "ScriptRead",
     "ExecutionRead", "ExecutionListParams",
     "StressTestCreate", "StressTestRead", "StressTestMetricsRead", "StressTestCompareRequest", "ScenarioInfo",
+    "ConversationRead", "ChatMessageRead", "ChatMessageCreate",
 ]
