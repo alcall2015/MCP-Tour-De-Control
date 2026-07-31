@@ -5,5 +5,6 @@ from app.models.script import Script
 from app.models.execution import Execution
 from app.models.stress_test import StressTest
 from app.models.stress_test_metrics import StressTestMetrics
+from app.models.conversation import Conversation, ChatMessage
 
-__all__ = ["Base", "Config", "McpServer", "Prompt", "Script", "Execution", "StressTest", "StressTestMetrics"]
+__all__ = ["Base", "Config", "McpServer", "Prompt", "Script", "Execution", "StressTest", "StressTestMetrics", "Conversation", "ChatMessage"]
