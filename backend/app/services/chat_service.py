@@ -323,7 +323,6 @@ async def _stream_llm(provider, model, api_key, messages, tools, stream_callback
             function_declarations = []
             for t in tools:
                 params = t["function"]["parameters"]
-                # Google requires specific format
                 function_declarations.append(genai.types.FunctionDeclaration(
                     name=t["function"]["name"],
                     description=t["function"]["description"],
@@ -333,58 +332,25 @@ async def _stream_llm(provider, model, api_key, messages, tools, stream_callback
 
         model_obj = genai.GenerativeModel(model, tools=google_tools)
 
-        # Build Google-format messages
-        history = []
-        system_text = ""
+        # Build flat prompt from messages (avoid Gemini chat history issues with function calls)
+        parts = []
         for m in messages:
             if m["role"] == "system":
-                system_text = m["content"]
+                parts.append(f"[System] {m['content']}")
             elif m["role"] == "user":
-                history.append({"role": "user", "parts": [m["content"]]})
+                parts.append(f"[User] {m['content']}")
             elif m["role"] == "assistant":
-                if m.get("tool_calls"):
-                    # Reconstruct function call parts for Gemini history
-                    parts = []
-                    for tc in m["tool_calls"]:
-                        fn = tc.get("function", tc)
-                        fn_name = fn.get("name", "")
-                        fn_args = fn.get("arguments", "{}")
-                        if isinstance(fn_args, str):
-                            try:
-                                fn_args = json.loads(fn_args)
-                            except json.JSONDecodeError:
-                                fn_args = {}
-                        parts.append(genai.protos.Part(function_call=genai.protos.FunctionCall(
-                            name=fn_name, args=fn_args,
-                        )))
-                    history.append({"role": "model", "parts": parts})
-                elif m.get("content"):
-                    history.append({"role": "model", "parts": [m["content"]]})
+                if m.get("content"):
+                    parts.append(f"[Assistant] {m['content']}")
             elif m["role"] == "tool":
                 fn_name = m.get("tool_call_id", "").replace("call_", "")
-                try:
-                    response_data = json.loads(m["content"])
-                except (json.JSONDecodeError, TypeError):
-                    response_data = {"result": m["content"]}
-                history.append({"role": "user", "parts": [
-                    genai.protos.Part(function_response=genai.protos.FunctionResponse(
-                        name=fn_name,
-                        response=response_data if isinstance(response_data, dict) else {"result": str(response_data)},
-                    ))
-                ]})
+                parts.append(f"[Tool result for {fn_name}] {m['content']}")
+        prompt = "\n\n".join(parts)
 
-        # Add system as first user context if needed
-        if system_text and history and history[0]["role"] == "user":
-            history[0]["parts"][0] = system_text + "\n\n" + history[0]["parts"][0]
-
-        chat = model_obj.start_chat(history=history[:-1] if history else [])
-        last_msg = history[-1]["parts"][0] if history else ""
-
-        response = chat.send_message(last_msg, stream=True)
+        response = model_obj.generate_content(prompt, stream=True)
         text = ""
         tool_calls = []
         for chunk in response:
-            # chunk.text raises ValueError when chunk contains a function_call
             try:
                 if chunk.text:
                     text += chunk.text
