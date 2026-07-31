@@ -146,12 +146,13 @@ class ChatService:
         for entry in context:
             messages.append({"role": entry["role"], "content": entry["content"]})
 
-        # Stream from LLM with tool call loop
+        # Stream from LLM with tool call loop (max 3 rounds to prevent infinite loops)
         full_response = ""
         all_tool_calls = []
+        max_tool_rounds = 3
 
         try:
-            while True:
+            for _round in range(max_tool_rounds + 1):
                 text_chunk, tool_calls_batch = await _stream_llm(
                     provider, model, api_key, messages, tools, stream_callback=lambda chunk: None
                 )
