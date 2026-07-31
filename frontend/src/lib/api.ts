@@ -242,3 +242,80 @@ export interface ScenarioInfo {
   description: string;
   type: string;
 }
+
+// Chat
+export const listConversations = () => request<Conversation[]>("/chat/conversations");
+export const createConversation = () =>
+  request<Conversation>("/chat/conversations", { method: "POST" });
+export const deleteConversation = (id: string) =>
+  request<void>(`/chat/conversations/${id}`, { method: "DELETE" });
+export const listMessages = (conversationId: string) =>
+  request<ChatMessageData[]>(`/chat/conversations/${conversationId}/messages`);
+export const sendMessageSSE = async (conversationId: string, content: string): Promise<Response> => {
+  const res = await fetch(`${BASE}/chat/conversations/${conversationId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(error.detail || res.statusText);
+  }
+  return res;
+};
+export const runScriptInChat = (conversationId: string, code: string) =>
+  request<{ status: string; output: string | null; error: string | null; duration_ms: number | null }>(
+    `/chat/conversations/${conversationId}/run-script`,
+    { method: "POST", body: JSON.stringify({ code }) }
+  );
+
+// Chat types
+export interface Conversation {
+  id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface ChatMessageData {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  tool_calls: Array<{ name: string; args: Record<string, unknown>; result: string }> | null;
+  created_at: string;
+}
+export interface SSEEvent {
+  event: "text" | "tool_call" | "tool_result" | "script" | "done" | "error";
+  data: Record<string, unknown>;
+}
+
+export function parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onEvent: (event: SSEEvent) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  return reader.read().then(function process({ done, value }): Promise<void> {
+    if (done) return Promise.resolve();
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    let currentEvent = "";
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ") && currentEvent) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          onEvent({ event: currentEvent as SSEEvent["event"], data });
+        } catch { /* skip malformed */ }
+        currentEvent = "";
+      }
+    }
+
+    return reader.read().then(process);
+  });
+}
