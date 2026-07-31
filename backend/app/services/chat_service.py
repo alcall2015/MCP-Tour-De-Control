@@ -363,9 +363,13 @@ async def _stream_llm(provider, model, api_key, messages, tools, stream_callback
         text = ""
         tool_calls = []
         for chunk in response:
-            if chunk.text:
-                text += chunk.text
-                stream_callback(chunk.text)
+            # chunk.text raises ValueError when chunk contains a function_call
+            try:
+                if chunk.text:
+                    text += chunk.text
+                    stream_callback(chunk.text)
+            except ValueError:
+                pass
             if hasattr(chunk, 'candidates') and chunk.candidates:
                 for candidate in chunk.candidates:
                     if hasattr(candidate, 'content') and candidate.content.parts:
