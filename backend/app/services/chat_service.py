@@ -342,13 +342,34 @@ async def _stream_llm(provider, model, api_key, messages, tools, stream_callback
             elif m["role"] == "user":
                 history.append({"role": "user", "parts": [m["content"]]})
             elif m["role"] == "assistant":
-                if m.get("content"):
+                if m.get("tool_calls"):
+                    # Reconstruct function call parts for Gemini history
+                    parts = []
+                    for tc in m["tool_calls"]:
+                        fn = tc.get("function", tc)
+                        fn_name = fn.get("name", "")
+                        fn_args = fn.get("arguments", "{}")
+                        if isinstance(fn_args, str):
+                            try:
+                                fn_args = json.loads(fn_args)
+                            except json.JSONDecodeError:
+                                fn_args = {}
+                        parts.append(genai.protos.Part(function_call=genai.protos.FunctionCall(
+                            name=fn_name, args=fn_args,
+                        )))
+                    history.append({"role": "model", "parts": parts})
+                elif m.get("content"):
                     history.append({"role": "model", "parts": [m["content"]]})
             elif m["role"] == "tool":
-                history.append({"role": "function", "parts": [
-                    genai.types.Part(function_response=genai.types.FunctionResponse(
-                        name=m.get("tool_call_id", "").replace("call_", ""),
-                        response={"result": m["content"]},
+                fn_name = m.get("tool_call_id", "").replace("call_", "")
+                try:
+                    response_data = json.loads(m["content"])
+                except (json.JSONDecodeError, TypeError):
+                    response_data = {"result": m["content"]}
+                history.append({"role": "user", "parts": [
+                    genai.protos.Part(function_response=genai.protos.FunctionResponse(
+                        name=fn_name,
+                        response=response_data if isinstance(response_data, dict) else {"result": str(response_data)},
                     ))
                 ]})
 
