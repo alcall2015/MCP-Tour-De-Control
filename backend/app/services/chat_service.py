@@ -156,11 +156,10 @@ class ChatService:
                     provider, model, api_key, messages, tools, stream_callback=lambda chunk: None
                 )
 
-                # Stream text
+                # Yield text as SSE event
                 if text_chunk:
-                    # We yield text in one block since provider-level streaming
-                    # is handled inside _stream_llm via callback
                     full_response += text_chunk
+                    yield _sse("text", {"content": text_chunk})
 
                 if not tool_calls_batch:
                     break
