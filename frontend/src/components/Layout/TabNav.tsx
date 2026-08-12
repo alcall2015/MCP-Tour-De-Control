@@ -100,6 +100,21 @@ export function TabNav() {
                 {tab.label}
               </NavLink>
             ))}
+            {/* AVA admin UI — separate app proxied on :8443, open in a new tab */}
+            <a
+              href={`https://${window.location.hostname}:8443`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-4 py-3.5 text-sm font-medium transition-all duration-200 hover:text-white"
+              style={{
+                color: "var(--text-secondary)",
+                borderBottom: "2px solid transparent",
+                marginBottom: "-1px",
+              }}
+              title="AVA — AI Voice Agent admin (new tab)"
+            >
+              AVA Admin ↗
+            </a>
           </div>
 
           {/* Right: Status strip */}

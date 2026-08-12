@@ -142,7 +142,7 @@ The stack is deployed at `46.225.115.154` (Hetzner, Ubuntu 26.04, 2 vCPU / 4 GB)
 The same host also runs (installed Aug 2026, NOT part of this repo):
 
 - **Asterisk 22.5.2** (apt) — ARI on `127.0.0.1:8088` (user `ava`, password in `/root/.ava_ari_password`), SIP UDP `5060`, dialplan: ext `1000` and `service` in `[default]` → `[from-ai-agent]` → `Stasis(asterisk-ai-voice-agent)`. PJSIP endpoints: `sipp-local` (identify 127.0.0.1, for local SIPp tests), softphone ext `6001`.
-- **AVA (Asterisk AI Voice Agent)** at `/opt/ava` (compose project `asterisk-ai-voice-agent`): `ai_engine` (health/metrics loopback-only `:15000`, AudioSocket `127.0.0.1:8090`) and `admin_ui`. The admin UI is bound to docker0 only (`172.17.0.1:3003`) and exposed through the main nginx at `https://tour.alcall.net:8443` (basic auth, same `.htpasswd`) — it is NOT publicly reachable on 3003. `local_ai_server` is stopped on purpose (cloud providers only, RAM budget).
+- **AVA (Asterisk AI Voice Agent)** at `/opt/ava` (compose project `asterisk-ai-voice-agent`): `ai_engine` (health/metrics loopback-only `:15000`, AudioSocket `127.0.0.1:8090`) and `admin_ui`. The admin UI is bound to docker0 only (`172.17.0.1:3003`) and exposed through the main nginx at `https://tour.alcall.net:8443` (basic auth, same `.htpasswd`, linked as "AVA Admin ↗" in the main UI nav) — it is NOT publicly reachable on 3003. `local_ai_server` is stopped on purpose (cloud providers only, RAM budget).
 
 ## Conventions
 
