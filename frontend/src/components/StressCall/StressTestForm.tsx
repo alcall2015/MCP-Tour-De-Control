@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { listScenarios } from "../../lib/api";
 import type { StressTestCreate } from "../../lib/api";
+import { TargetRoutingHelp } from "./TargetRoutingHelp";
 
 interface Props {
   onSubmit: (data: StressTestCreate) => void;
@@ -111,6 +112,9 @@ export function StressTestForm({ onSubmit, onCancel, isSubmitting }: Props) {
           />
         </div>
       </div>
+
+      {/* Call loop-back help */}
+      <TargetRoutingHelp />
 
       {/* Transport */}
       <div>
