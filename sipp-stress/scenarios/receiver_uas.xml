@@ -2,11 +2,7 @@
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
 <scenario name="Receiver UAS">
 
-  <recv request="INVITE" crlf="true">
-    <action>
-      <ereg regexp=".*" search_in="body" assign_to="remote_sdp"/>
-    </action>
-  </recv>
+  <recv request="INVITE" crlf="true"/>
 
   <send>
     <![CDATA[

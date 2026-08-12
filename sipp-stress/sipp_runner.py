@@ -16,6 +16,15 @@ SCENARIOS_DIR = Path("/app/scenarios")
 MEDIA_DIR = Path("/app/media")
 RESULTS_BASE = Path("/tmp/sipp")
 
+# SIP signaling ports (host network). Asterisk owns 5060 and has priority —
+# SIPp must never overlap with Asterisk or AVA ports.
+UAC_SIP_PORT = 5070
+UAS_SIP_PORT = 5080
+# RTP media port bases (~4 ports per simultaneous call). Chosen to stay clear of:
+#   Asterisk RTP 10000-20000, AVA ExternalMedia 18080-18099, ephemeral 32768+.
+UAS_MEDIA_PORT_BASE = 21000  # up to ~1200 simultaneous calls
+UAC_MEDIA_PORT_BASE = 26000  # up to ~1500 simultaneous calls
+
 
 @dataclass
 class TestConfig:
@@ -102,19 +111,21 @@ class SippRunner:
         rate_args = ["-r", str(config.cps)]
         if config.ramp_up > 0:
             rate_args += ["-rate_increase", str(config.ramp_step),
-                          "-rate_increase_interval", "1000",
+                          "-rate_interval", "1s",
                           "-rate_max", str(config.cps)]
             rate_args[1] = str(config.ramp_step)  # start at ramp_step CPS
 
-        # Start UAS first (receiver)
+        # Start UAS first (receiver).
+        # nice: SIPp yields CPU to Asterisk, which has priority on this host.
         uas_cmd = [
+            "nice", "-n", "10",
             "sipp", "-sf", str(SCENARIOS_DIR / "receiver_uas.xml"),
-            "-p", "5080",
+            "-p", str(UAS_SIP_PORT),
+            "-mp", str(UAS_MEDIA_PORT_BASE),
             "-inf", str(uas_csv),
-            "-trace_stat", "-trace_rtt", "-trace_err",
+            "-trace_stat", "-trace_err",
             "-stf", str(results / "uas_stats.csv"),
-            "-rtf", str(results / "uas_rtt.csv"),
-            "-ef", str(results / "uas_errors.log"),
+            "-error_file", str(results / "uas_errors.log"),
             "-bg", "-nostdin",
             *transport_flag.split(),
         ]
@@ -130,27 +141,33 @@ class SippRunner:
 
         # Start UAC (caller)
         uac_cmd = [
+            "nice", "-n", "10",
             "sipp", f"{config.target_host}:{config.target_port}",
             "-sf", str(scenario_file),
-            "-p", "5070",
+            "-p", str(UAC_SIP_PORT),
+            "-mp", str(UAC_MEDIA_PORT_BASE),
             "-inf", str(uac_csv),
             *rate_args,
             "-m", str(config.max_calls),
             "-l", str(min(config.max_calls, config.cps * 10)),
-            "-d", str(config.duration * 1000),
-            "-trace_stat", "-trace_rtt", "-trace_err",
+            # -d drives the bare <pause/> in scenarios = per-call duration
+            # (SIPp 3.6.1 cannot substitute [fieldN] in pause attributes).
+            "-d", str(config.call_duration * 1000),
+            "-trace_stat", "-trace_rtt", "-rtt_freq", "1", "-trace_err",
             "-stf", str(results / "uac_stats.csv"),
-            "-rtf", str(results / "uac_rtt.csv"),
-            "-ef", str(results / "uac_errors.log"),
+            "-error_file", str(results / "uac_errors.log"),
             "-fd", "1",
             *transport_flag.split(),
         ]
 
         log.info("Starting UAC", cmd=" ".join(uac_cmd))
+        # cwd=results: Debian sip-tester has no -rtf, -trace_rtt writes
+        # <scenario>_<pid>_rtt.csv into the process CWD (renamed in _monitor).
         uac_proc = await asyncio.create_subprocess_exec(
             *uac_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=str(results),
         )
 
         test = RunningTest(
@@ -174,6 +191,11 @@ class SippRunner:
             return
         await test.uac_process.wait()
         test.status = "completed" if test.uac_process.returncode == 0 else "failed"
+        # Normalize the RTT dump (<scenario>_<pid>_rtt.csv in cwd) to the name
+        # metrics_parser expects.
+        results = RESULTS_BASE / test_id
+        for rtt_file in results.glob("*_rtt.csv"):
+            rtt_file.rename(results / "uac_rtt.csv")
         # Stop UAS
         if test.uas_process and test.uas_process.returncode is None:
             try:

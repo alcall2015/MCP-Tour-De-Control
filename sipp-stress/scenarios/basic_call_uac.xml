@@ -29,11 +29,7 @@
   <recv response="100" optional="true" />
   <recv response="180" optional="true" />
 
-  <recv response="200" rtd="true" crlf="true">
-    <action>
-      <ereg regexp=".*" search_in="body" assign_to="remote_sdp"/>
-    </action>
-  </recv>
+  <recv response="200" rtd="true" crlf="true"/>
 
   <send>
     <![CDATA[
@@ -55,7 +51,9 @@
     </action>
   </nop>
 
-  <pause milliseconds="[field1]"/>
+  <!-- SIPp 3.6.1 cannot substitute [fieldN] in pause attributes:
+       per-call duration comes from the -d flag (call_duration). -->
+  <pause/>
 
   <send retrans="500">
     <![CDATA[
