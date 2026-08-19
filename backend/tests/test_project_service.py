@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -97,6 +98,62 @@ async def test_refresh_all_without_google_key_raises(session):
 
     with pytest.raises(GoogleAccessError):
         await ProjectService.refresh_all(session)
+
+
+async def test_refresh_one_with_kpi_source_writes_snapshot(session):
+    project = await _project_with_source(session)
+    google = _fake_google({"avancement": 55.0}, NOW - timedelta(days=1))
+
+    with patch("app.services.project_service.GoogleService", return_value=google):
+        result = await ProjectService.refresh_one(session, project.id)
+
+    assert result is True
+    snapshots = (await session.execute(select(ProjectSnapshot))).scalars().all()
+    assert len(snapshots) == 1
+    assert snapshots[0].project_id == project.id
+    assert snapshots[0].metrics == {"avancement": 55.0}
+    assert snapshots[0].error is None
+
+
+async def test_refresh_one_without_kpi_source_returns_false(session):
+    project = Project(name="No source")
+    session.add(project)
+    session.add(Config(google_sa_key=encrypt_value('{"type": "service_account"}')))
+    await session.commit()
+    await session.refresh(project)
+
+    with patch("app.services.project_service.GoogleService", return_value=_fake_google()):
+        result = await ProjectService.refresh_one(session, project.id)
+
+    assert result is False
+    assert (await session.execute(select(ProjectSnapshot))).scalars().all() == []
+
+
+async def test_refresh_one_with_unknown_project_id_returns_false(session):
+    project = await _project_with_source(session)
+    unknown_id = uuid.uuid4()
+    assert unknown_id != project.id
+
+    with patch("app.services.project_service.GoogleService", return_value=_fake_google()):
+        result = await ProjectService.refresh_one(session, unknown_id)
+
+    assert result is False
+    assert (await session.execute(select(ProjectSnapshot))).scalars().all() == []
+
+
+async def test_snapshot_error_clears_metrics_even_if_read_suivi_succeeded(session):
+    await _project_with_source(session)
+    google = MagicMock()
+    google.read_suivi.return_value = {"avancement": 60.0}
+    google.get_modified_time.side_effect = GoogleAccessError("modified time failed")
+
+    with patch("app.services.project_service.GoogleService", return_value=google):
+        await ProjectService.refresh_all(session)
+
+    snapshot = (await session.execute(select(ProjectSnapshot))).scalar_one()
+    assert snapshot.metrics is None
+    assert snapshot.source_modified_at is None
+    assert "modified time failed" in snapshot.error
 
 
 async def test_build_views_exposes_status_trends_and_sparkline(session):

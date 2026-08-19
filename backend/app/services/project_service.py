@@ -20,6 +20,11 @@ SPARKLINE_POINTS = 30
 SPARKLINE_METRIC = "avancement"
 
 
+def _is_number(value) -> bool:
+    """True for int/float values, excluding bool (a subclass of int)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 class ProjectService:
     @staticmethod
     async def refresh_all(session: AsyncSession) -> int:
@@ -102,6 +107,8 @@ class ProjectService:
             modified_at = await asyncio.to_thread(google.get_modified_time, source.file_id)
         except GoogleAccessError as exc:
             error = str(exc)
+            metrics = None
+            modified_at = None
             log.warning("Project source read failed", project=project.name, error=error)
 
         session.add(
@@ -136,7 +143,7 @@ class ProjectService:
             for value in (
                 (s.metrics or {}).get(SPARKLINE_METRIC) for s in reversed(snapshots)
             )
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            if _is_number(value)
         ]
 
         return {
@@ -193,7 +200,7 @@ def budget_summary(views: list[dict]) -> dict:
         metrics = view.get("metrics") or {}
         project_consumed = metrics.get("budget_consomme")
         project_total = metrics.get("budget_total")
-        if isinstance(project_consumed, (int, float)) and isinstance(project_total, (int, float)):
+        if _is_number(project_consumed) and _is_number(project_total):
             consumed += float(project_consumed)
             total += float(project_total)
             counted += 1
