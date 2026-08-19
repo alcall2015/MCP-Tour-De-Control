@@ -44,6 +44,20 @@ async def _execute_prompt_job(prompt_id: str):
         log.info("Cron job completed", prompt_id=prompt_id, status=execution.status)
 
 
+async def _execute_projects_refresh():
+    """Callback executed by APScheduler to refresh every project's indicators."""
+    from app.database import async_session
+    from app.services.project_service import ProjectService
+
+    log.info("Projects refresh triggered")
+    try:
+        async with async_session() as session:
+            count = await ProjectService.refresh_all(session)
+        log.info("Projects refresh completed", count=count)
+    except Exception as exc:
+        log.error("Projects refresh failed", error=str(exc))
+
+
 class SchedulerService:
     def __init__(self, use_db_jobstore: bool = True):
         jobstores = {}
@@ -110,6 +124,18 @@ class SchedulerService:
         except Exception:
             log.warning("Job not found for reschedule, adding instead", job_id=job_id)
             self.add_job(prompt_id, cron_expr)
+
+    PROJECTS_JOB_ID = "projects_refresh"
+
+    def set_projects_job(self, cron_expr: str):
+        """Create or reschedule the daily projects refresh."""
+        self.scheduler.add_job(
+            _execute_projects_refresh,
+            trigger=CronTrigger.from_crontab(cron_expr),
+            id=self.PROJECTS_JOB_ID,
+            replace_existing=True,
+        )
+        log.info("Projects job scheduled", cron=cron_expr)
 
 
 def _make_scheduler_service() -> "SchedulerService":

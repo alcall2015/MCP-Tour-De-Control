@@ -43,6 +43,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.error("Failed to restore cron jobs from DB", error=str(exc))
 
+    # Schedule the daily projects refresh from the stored cron expression
+    try:
+        async with async_session() as session:
+            from app.models import Config
+
+            config = (await session.execute(select(Config).limit(1))).scalar_one_or_none()
+            cron_expr = config.projects_cron if config else "0 6 * * *"
+            scheduler_service.set_projects_job(cron_expr)
+            log.info("Projects refresh scheduled", cron=cron_expr)
+    except Exception as exc:
+        log.error("Failed to schedule projects refresh", error=str(exc))
+
     # Auto-register or update sipp-stress MCP server
     try:
         async with async_session() as session:
