@@ -62,6 +62,27 @@ async def test_google_key_is_encrypted_and_never_returned(client, setup_test_db)
         assert decrypt_value(config.google_sa_key) == '{"type": "service_account"}'
 
 
+async def test_invalid_cron_leaves_a_valid_google_key_unwritten(client, setup_test_db):
+    # Validation happens before any assignment, so a PUT carrying BOTH a
+    # valid google_sa_key AND an invalid projects_cron must reject the whole
+    # request (422) and must not persist the pasted credential either.
+    with patch("app.routers.config.scheduler_service") as scheduler:
+        response = await client.put(
+            "/api/v1/config",
+            json={
+                "google_sa_key": '{"type": "service_account"}',
+                "projects_cron": "not a cron",
+            },
+        )
+
+    assert response.status_code == 422
+    scheduler.set_projects_job.assert_not_called()
+
+    async with setup_test_db() as session:
+        config = (await session.execute(select(Config))).scalar_one_or_none()
+        assert config is None or not config.google_sa_key
+
+
 async def test_default_projects_cron_is_exposed(client):
     response = await client.get("/api/v1/config")
     assert response.status_code == 200
