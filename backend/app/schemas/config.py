@@ -10,6 +10,7 @@ class ConfigRead(BaseModel):
     llm_model: str
     api_key_set: bool  # never expose the key, just whether it's set
     google_sa_key_set: bool  # same rule for the Google service account key
+    google_sa_email: str | None = None  # client_email only, never other key material
     projects_cron: str
     updated_at: datetime
 

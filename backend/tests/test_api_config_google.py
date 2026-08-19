@@ -1,3 +1,4 @@
+import json
 import os
 
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
@@ -88,6 +89,53 @@ async def test_default_projects_cron_is_exposed(client):
     assert response.status_code == 200
     assert response.json()["projects_cron"] == "0 6 * * *"
     assert response.json()["google_sa_key_set"] is False
+    assert response.json()["google_sa_email"] is None
+
+
+async def test_google_sa_email_is_exposed_but_no_other_key_material_is(client, setup_test_db):
+    key_json = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "proj-123",
+            "private_key_id": "abc123",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nSUPER-SECRET\n-----END PRIVATE KEY-----\n",
+            "client_email": "svc@proj-123.iam.gserviceaccount.com",
+            "client_id": "999999",
+        }
+    )
+    with patch("app.routers.config.scheduler_service"):
+        response = await client.put("/api/v1/config", json={"google_sa_key": key_json})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["google_sa_email"] == "svc@proj-123.iam.gserviceaccount.com"
+    assert body["google_sa_key_set"] is True
+
+    serialized = json.dumps(body)
+    for secret in ["SUPER-SECRET", "private_key", "private_key_id", "abc123", "999999"]:
+        assert secret not in serialized
+
+    # A follow-up GET must keep exposing only the email, never the raw key.
+    get_response = await client.get("/api/v1/config")
+    assert get_response.json()["google_sa_email"] == "svc@proj-123.iam.gserviceaccount.com"
+    assert "google_sa_key" not in get_response.json()
+
+
+async def test_google_sa_email_is_none_for_unparsable_key(client, setup_test_db):
+    with patch("app.routers.config.scheduler_service"):
+        response = await client.put("/api/v1/config", json={"google_sa_key": "not valid json"})
+
+    assert response.status_code == 200
+    assert response.json()["google_sa_email"] is None
+
+
+async def test_google_sa_email_is_none_when_client_email_absent(client, setup_test_db):
+    key_json = json.dumps({"type": "service_account", "project_id": "proj-123"})
+    with patch("app.routers.config.scheduler_service"):
+        response = await client.put("/api/v1/config", json={"google_sa_key": key_json})
+
+    assert response.status_code == 200
+    assert response.json()["google_sa_email"] is None
 
 
 async def test_changing_cron_reschedules_the_job(client):

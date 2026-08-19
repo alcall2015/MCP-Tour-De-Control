@@ -52,6 +52,11 @@ export function GoogleConfig() {
             <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
               Share every project Sheet with this service account email, then keep the files private.
             </p>
+            {config?.google_sa_email && (
+              <p className="mt-1 font-mono text-xs" style={{ color: "var(--text-secondary)" }}>
+                {config.google_sa_email}
+              </p>
+            )}
           </div>
 
           <div>

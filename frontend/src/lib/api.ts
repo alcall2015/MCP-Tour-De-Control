@@ -87,6 +87,7 @@ export interface Config {
   api_key_set: boolean;
   updated_at: string;
   google_sa_key_set: boolean;
+  google_sa_email: string | null;
   projects_cron: string;
 }
 export interface ConfigUpdate {

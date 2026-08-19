@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,9 +8,26 @@ from app.database import get_async_session
 from app.models import Config
 from app.schemas import ConfigRead, ConfigUpdate
 from app.services.scheduler_service import is_valid_cron, scheduler_service
-from app.utils.crypto import encrypt_value
+from app.utils.crypto import decrypt_value, encrypt_value
 
 router = APIRouter(prefix="/api/v1/config", tags=["config"])
+
+
+def _google_sa_email(config: Config) -> str | None:
+    """Best-effort extraction of client_email from the stored key.
+
+    Never returns anything else from the key: a missing key, undecryptable
+    ciphertext, unparsable JSON, or a JSON body without client_email all
+    resolve to None.
+    """
+    if not config.google_sa_key:
+        return None
+    try:
+        data = json.loads(decrypt_value(config.google_sa_key))
+    except Exception:
+        return None
+    email = data.get("client_email") if isinstance(data, dict) else None
+    return email if isinstance(email, str) else None
 
 
 async def _get_or_create_config(session: AsyncSession) -> Config:
@@ -29,6 +48,7 @@ def _to_read(config: Config) -> ConfigRead:
         llm_model=config.llm_model,
         api_key_set=bool(config.api_key),
         google_sa_key_set=bool(config.google_sa_key),
+        google_sa_email=_google_sa_email(config),
         projects_cron=config.projects_cron,
         updated_at=config.updated_at,
     )
