@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConfig, updateConfig } from "../../lib/api";
-import { MutationError } from "../Projects/MutationError";
+import { MutationError } from "../ui/MutationError";
 import { Spinner } from "../ui/Spinner";
 
 export function GoogleConfig() {

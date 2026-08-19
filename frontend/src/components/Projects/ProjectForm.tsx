@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createProject, updateProject, type Project } from "../../lib/api";
-import { MutationError } from "./MutationError";
+import { MutationError } from "../ui/MutationError";
 
 export function ProjectForm({ project, onDone }: { project?: Project; onDone: () => void }) {
   const queryClient = useQueryClient();

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { addProjectLink, deleteProjectLink, type Project } from "../../lib/api";
-import { MutationError } from "./MutationError";
+import { MutationError } from "../ui/MutationError";
 
 export function LinkForm({ project, onDone }: { project: Project; onDone: () => void }) {
   const queryClient = useQueryClient();
