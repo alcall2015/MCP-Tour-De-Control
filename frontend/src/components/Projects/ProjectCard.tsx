@@ -15,11 +15,17 @@ function humanize(key: string): string {
   return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
-function Trend({ delta }: { delta: number | undefined }) {
+// "up-good": rising reads as good news (e.g. avancement).
+// "up-bad": rising reads as a warning (e.g. budget_consomme) — spending more
+// is not an achievement, so it must not render in the success color.
+type TrendPolarity = "up-good" | "up-bad";
+
+function Trend({ delta, polarity = "up-good" }: { delta: number | undefined; polarity?: TrendPolarity }) {
   if (delta === undefined || delta === 0) return null;
   const up = delta > 0;
+  const isGoodNews = polarity === "up-good" ? up : !up;
   return (
-    <span className="ml-1.5 text-xs" style={{ color: up ? "var(--success)" : "var(--error)" }}>
+    <span className="ml-1.5 text-xs" style={{ color: isGoodNews ? "var(--success)" : "var(--warning)" }}>
       {up ? "▲" : "▼"} {formatNumber(Math.abs(delta))}
     </span>
   );
@@ -38,11 +44,13 @@ export function ProjectCard({
   onEdit,
   onManageLinks,
   onDelete,
+  isDeleting,
 }: {
   project: Project;
   onEdit?: () => void;
   onManageLinks?: () => void;
   onDelete?: () => void;
+  isDeleting?: boolean;
 }) {
   const metrics = project.metrics ?? {};
   const consumed = metrics.budget_consomme;
@@ -72,7 +80,9 @@ export function ProjectCard({
 
       {project.error && (
         <p className="mb-3 text-xs" style={{ color: "var(--error)" }}>
-          Read failed — showing last known values from {relativeDate(project.captured_at)}.
+          {project.metrics_captured_at
+            ? `Latest refresh attempt (${relativeDate(project.captured_at)}) failed — showing values from ${relativeDate(project.metrics_captured_at)}.`
+            : `Latest refresh attempt (${relativeDate(project.captured_at)}) failed — no metrics have been read successfully yet.`}
         </p>
       )}
 
@@ -96,7 +106,7 @@ export function ProjectCard({
             </span>
             <div className="text-sm" style={{ color: "var(--text-primary)" }}>
               {formatNumber(consumed)} / {formatNumber(total)}
-              <Trend delta={project.trends.budget_consomme} />
+              <Trend delta={project.trends.budget_consomme} polarity="up-bad" />
             </div>
           </div>
         )}
@@ -140,7 +150,13 @@ export function ProjectCard({
       </div>
 
       <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
-        Last read {relativeDate(project.captured_at)}
+        {project.metrics_captured_at
+          ? `Last successful read ${relativeDate(project.metrics_captured_at)}`
+          : "Never read successfully"}
+        {project.error &&
+          project.captured_at &&
+          project.captured_at !== project.metrics_captured_at &&
+          ` · last attempt failed ${relativeDate(project.captured_at)}`}
         {project.source_modified_at && ` · file modified ${relativeDate(project.source_modified_at)}`}
       </p>
 
@@ -157,8 +173,13 @@ export function ProjectCard({
             </button>
           )}
           {onDelete && (
-            <button className="text-xs" style={{ color: "var(--error)" }} onClick={onDelete}>
-              Delete
+            <button
+              className="text-xs disabled:opacity-50"
+              style={{ color: "var(--error)" }}
+              disabled={isDeleting}
+              onClick={onDelete}
+            >
+              {isDeleting ? "Deleting..." : "Delete"}
             </button>
           )}
         </div>

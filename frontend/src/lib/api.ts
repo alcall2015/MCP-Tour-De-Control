@@ -277,6 +277,7 @@ export interface Project {
   trends: Record<string, number>;
   sparkline: number[];
   captured_at: string | null;
+  metrics_captured_at: string | null;
   source_modified_at: string | null;
   error: string | null;
 }
