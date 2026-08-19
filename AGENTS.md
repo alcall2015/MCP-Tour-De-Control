@@ -11,10 +11,11 @@ MCP Tour De Control is a web platform for automating tasks through MCP (Model Co
 3. Scripts are versioned, stored in PostgreSQL, and executed on **cron schedules** (APScheduler, in-process) in subprocesses. Results land in an **Executions/Reports** view.
 4. Scripts are "hybrid": they only call the LLM at runtime when reasoning is needed (secrets are injected via env vars, never hardcoded).
 
-On top of that core loop there are two more features:
+On top of that core loop there are three more features:
 
 - **Stress Call**: SIP load testing. A dedicated MCP server (`sipp-stress/`) wraps the SIPp binary; the backend drives it through the MCP protocol and polls SIP/RTP metrics (ASR, PDD, CPS, jitter, MOS...).
 - **Chat**: a conversational assistant (its system prompt is in French — it answers in French) that can call MCP tools live and generate scripts, streamed over SSE.
+- **Projects**: director dashboard. Google Docs/Sheets links grouped by project, with indicators read daily from a `SUIVI` key/value tab in each project's Sheet through a Google service account, stored as snapshots for trend display.
 
 Authoritative design docs live in `docs/superpowers/specs/` and implementation plans in `docs/superpowers/plans/`. Read those before large changes.
 
@@ -39,7 +40,7 @@ Three independently buildable components plus a compose file:
 │   ├── test_mcp_server.py  standalone FastMCP server with 4 dummy tools for end-to-end testing
 │   └── requirements.txt    pinned deps (no pyproject.toml)
 ├── frontend/         React SPA
-│   ├── src/pages/          one file per tab: Prompts, Reports, StressCall, Chat, Config
+│   ├── src/pages/          one file per tab: Prompts, Reports, StressCall, Chat, Projects, Config
 │   ├── src/components/     grouped by feature (Chat/, Config/, Prompts/, Reports/, StressCall/, Layout/, ui/)
 │   ├── src/lib/api.ts      ALL backend calls + shared TypeScript interfaces live here
 │   └── vite.config.ts      dev server on :3000, proxies /api → http://localhost:8000
