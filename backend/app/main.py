@@ -11,6 +11,7 @@ from app.routers import chat as chat_router
 from app.routers import config as config_router
 from app.routers import executions as executions_router
 from app.routers import mcp_servers as mcp_servers_router
+from app.routers import projects as projects_router
 from app.routers import prompts as prompts_router
 from app.routers import scripts as scripts_router
 from app.routers import stress_tests as stress_tests_router
@@ -91,6 +92,7 @@ app.include_router(prompts_router.router)
 app.include_router(scripts_router.router)
 app.include_router(stress_tests_router.router)
 app.include_router(chat_router.router)
+app.include_router(projects_router.router)
 
 
 @app.get("/health")
