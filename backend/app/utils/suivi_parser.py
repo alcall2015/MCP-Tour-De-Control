@@ -5,6 +5,7 @@ import unicodedata
 from datetime import date, datetime
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_FR_DATE_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 _NUMERIC_RE = re.compile(r"^-?[\d.,]+$")
 
 
@@ -31,13 +32,32 @@ def parse_value(raw) -> float | str:
 
 
 def parse_date(value) -> date | None:
-    """Convert an ISO YYYY-MM-DD string to a date. Anything else returns None."""
-    if not isinstance(value, str) or not _ISO_DATE_RE.match(value.strip()):
+    """Convert a date string to a date. Anything else, or not a real calendar date, returns None.
+
+    Accepts ISO `YYYY-MM-DD` (Sheets API's raw value) and French `DD/MM/YYYY`
+    (how the Sheets API returns a cell as displayed on a French-locale
+    spreadsheet). On an ambiguous DD/MM/YYYY that could also read as
+    MM/DD/YYYY, the day-first (French) reading wins.
+    """
+    if not isinstance(value, str):
         return None
-    try:
-        return datetime.strptime(value.strip(), "%Y-%m-%d").date()
-    except ValueError:
-        return None
+    text = value.strip()
+
+    if _ISO_DATE_RE.match(text):
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    match = _FR_DATE_RE.match(text)
+    if match:
+        day, month, year = (int(part) for part in match.groups())
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+
+    return None
 
 
 def parse_suivi_rows(rows: list[list]) -> dict[str, float | str]:

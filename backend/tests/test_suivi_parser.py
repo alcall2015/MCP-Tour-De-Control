@@ -57,9 +57,30 @@ def test_parse_value_strings(raw, expected):
 
 def test_parse_date():
     assert parse_date("2026-08-28") == date(2026, 8, 28)
-    assert parse_date("28/08/2026") is None
     assert parse_date("Fabien") is None
     assert parse_date(72.0) is None
+
+
+def test_parse_date_accepts_french_ddmmyyyy():
+    # The Sheets API returns cells as displayed: a French-locale spreadsheet
+    # yields DD/MM/YYYY. 28/08/2026 is unambiguous (no month 28) and must
+    # parse as 28 August 2026.
+    assert parse_date("28/08/2026") == date(2026, 8, 28)
+
+
+def test_parse_date_prefers_day_first_on_ambiguous_ddmmyyyy():
+    # 05/03/2026 could be read as either 5 March (day-first, French) or
+    # 3 May (month-first, US). The French reading must win.
+    assert parse_date("05/03/2026") == date(2026, 3, 5)
+
+
+def test_parse_date_rejects_non_calendar_dates():
+    assert parse_date("32/01/2026") is None
+    assert parse_date("31/02/2026") is None
+    assert parse_date("2026/08/28") is None
+    assert parse_date("28-08-2026") is None
+    assert parse_date("") is None
+    assert parse_date(None) is None
 
 
 def test_parse_suivi_rows():
