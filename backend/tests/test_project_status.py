@@ -99,3 +99,23 @@ def test_critical_wins_over_attention():
 def test_reason_is_human_readable():
     result = status(metrics={"budget_consomme": 5200.0, "budget_total": 5000.0})
     assert "budget" in result["reason"].lower()
+
+
+def test_zero_total_with_consumption_is_critical():
+    # budget_total == 0 is a present value, not a missing metric: a missing
+    # metric skips its rule, but 0 does not, so a real overrun must still fire.
+    result = status(metrics={"budget_consomme": 500.0, "budget_total": 0.0})
+    assert result["level"] == LEVEL_CRITICAL
+    assert "overrun" in result["reason"].lower()
+
+
+def test_zero_total_attention_rule_does_not_crash_or_misfire():
+    # With total == 0, the percentage rule must never attempt a division by
+    # zero, and the critical overrun rule (which comes first) must win
+    # instead of letting a low warn threshold wrongly report "attention".
+    result = status(
+        metrics={"budget_consomme": 1.0, "budget_total": 0.0},
+        budget_warn_pct=1,
+    )
+    assert result["level"] == LEVEL_CRITICAL
+    assert "overrun" in result["reason"].lower()

@@ -36,7 +36,7 @@ def compute_status(
     consumed = _number(metrics.get("budget_consomme"))
     total = _number(metrics.get("budget_total"))
 
-    if consumed is not None and total is not None and total > 0:
+    if consumed is not None and total is not None:
         if consumed > total:
             return {"level": LEVEL_CRITICAL, "reason": "budget overrun"}
 

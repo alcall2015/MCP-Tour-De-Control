@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from app.services.project_status import compute_trends, select_reference
+from app.services.project_status import TREND_WINDOW_DAYS, compute_trends, select_reference
 
 NOW = datetime(2026, 8, 19, 6, 0, tzinfo=timezone.utc)
 
@@ -42,3 +42,17 @@ def test_select_reference_falls_back_to_oldest():
 
 def test_select_reference_without_history():
     assert select_reference([], NOW) is None
+
+
+def test_select_reference_accepts_snapshot_exactly_at_window_boundary():
+    # "at least TREND_WINDOW_DAYS older" must accept the exact boundary
+    # (captured_at <= cutoff), not just strictly older snapshots.
+    boundary = NOW - timedelta(days=TREND_WINDOW_DAYS)
+    history = [
+        (NOW - timedelta(days=2), {"avancement": 44.0}),
+        (boundary, {"avancement": 40.0}),
+        (NOW - timedelta(days=30), {"avancement": 10.0}),
+    ]
+    captured_at, metrics = select_reference(history, NOW)
+    assert captured_at == boundary
+    assert metrics == {"avancement": 40.0}
