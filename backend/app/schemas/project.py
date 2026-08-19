@@ -71,6 +71,7 @@ class ProjectView(BaseModel):
     trends: dict
     sparkline: list[float]
     captured_at: datetime | None
+    metrics_captured_at: datetime | None
     source_modified_at: datetime | None
     error: str | None
 

@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from sqlalchemy import select
@@ -11,7 +11,12 @@ from sqlalchemy.orm import selectinload
 
 from app.models import Config, Project, ProjectSnapshot
 from app.services.google_service import GoogleAccessError, GoogleService
-from app.services.project_status import compute_status, compute_trends, select_reference
+from app.services.project_status import (
+    TREND_WINDOW_DAYS,
+    compute_status,
+    compute_trends,
+    select_reference,
+)
 from app.utils.crypto import decrypt_value
 
 log = structlog.get_logger()
@@ -128,14 +133,35 @@ class ProjectService:
         reference = select_reference(history, latest.captured_at) if latest else None
         reference_metrics = reference[1] if reference else None
 
+        # On a failed read the latest snapshot carries no metrics. Fall back to
+        # the most recent snapshot without an error so the card keeps showing
+        # its last known values (with their own date) instead of going blank.
+        good_snapshot = next((s for s in snapshots if s.error is None), None)
+        display_metrics = good_snapshot.metrics if good_snapshot else None
+        metrics_captured_at = good_snapshot.captured_at if good_snapshot else None
+
+        # select_reference() falls back to the oldest snapshot even when it is
+        # younger than TREND_WINDOW_DAYS — correct for trend deltas, but the
+        # stagnation rule (spec rule 6) must only fire from a reference that is
+        # genuinely at least TREND_WINDOW_DAYS older than the latest snapshot.
+        stagnation_reference_metrics = None
+        if latest and reference:
+            reference_captured_at = reference[0]
+            if reference_captured_at <= latest.captured_at - timedelta(days=TREND_WINDOW_DAYS):
+                stagnation_reference_metrics = reference_metrics
+
+        has_kpi_source = any(link.is_kpi_source and link.file_id for link in project.links)
+
         status = compute_status(
-            metrics=latest.metrics if latest else None,
+            metrics=display_metrics,
             error=latest.error if latest else None,
             source_modified_at=latest.source_modified_at if latest else None,
-            previous_metrics=reference_metrics,
+            previous_metrics=stagnation_reference_metrics,
             stale_days=project.stale_days,
             budget_warn_pct=project.budget_warn_pct,
             now=now,
+            has_kpi_source=has_kpi_source,
+            has_snapshot=latest is not None,
         )
 
         sparkline = [
@@ -165,10 +191,11 @@ class ProjectService:
                 for link in project.links
             ],
             "status": status,
-            "metrics": latest.metrics if latest else None,
-            "trends": compute_trends(latest.metrics if latest else None, reference_metrics),
+            "metrics": display_metrics,
+            "trends": compute_trends(display_metrics, reference_metrics),
             "sparkline": sparkline,
             "captured_at": latest.captured_at if latest else None,
+            "metrics_captured_at": metrics_captured_at,
             "source_modified_at": latest.source_modified_at if latest else None,
             "error": latest.error if latest else None,
         }

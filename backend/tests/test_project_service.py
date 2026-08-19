@@ -188,14 +188,164 @@ async def test_build_views_exposes_status_trends_and_sparkline(session):
     assert len(view["links"]) == 1
 
 
-async def test_build_views_without_snapshot_is_unknown(session):
+async def test_build_views_does_not_stagnate_on_recent_reference(session):
+    # Only a 2-day-old reference exists (< TREND_WINDOW_DAYS). It is a valid
+    # trend fallback, but must NOT be used to evaluate stagnation: a fresh
+    # install with unchanged avancement over its first couple of days must
+    # not read "Attention".
+    project = await _project_with_source(session)
+    session.add(
+        ProjectSnapshot(
+            project_id=project.id,
+            captured_at=NOW - timedelta(days=2),
+            metrics={"avancement": 40.0},
+            source_modified_at=NOW - timedelta(days=2),
+        )
+    )
+    session.add(
+        ProjectSnapshot(
+            project_id=project.id,
+            captured_at=NOW,
+            metrics={"avancement": 40.0},
+            source_modified_at=NOW - timedelta(days=1),
+        )
+    )
+    await session.commit()
+
+    views = await ProjectService.build_views(session, now=NOW)
+
+    assert views[0]["status"]["level"] == "nominal"
+
+
+async def test_build_views_stagnates_on_reference_at_least_a_week_old(session):
+    # An 8-day-old reference IS old enough: unchanged avancement must trigger
+    # the stagnation rule.
+    project = await _project_with_source(session)
+    session.add(
+        ProjectSnapshot(
+            project_id=project.id,
+            captured_at=NOW - timedelta(days=8),
+            metrics={"avancement": 40.0},
+            source_modified_at=NOW - timedelta(days=8),
+        )
+    )
+    session.add(
+        ProjectSnapshot(
+            project_id=project.id,
+            captured_at=NOW,
+            metrics={"avancement": 40.0},
+            source_modified_at=NOW - timedelta(days=1),
+        )
+    )
+    await session.commit()
+
+    views = await ProjectService.build_views(session, now=NOW)
+
+    assert views[0]["status"]["level"] == "attention"
+    assert "stalled" in views[0]["status"]["reason"]
+
+
+async def test_build_views_falls_back_to_last_good_snapshot_on_error(session):
+    # The latest snapshot is a failed read (metrics=None, error set), but an
+    # older good snapshot exists. The card must keep showing those last known
+    # values (with their own date), not go blank, and must still contribute
+    # to budget_summary/pending_decisions.
+    project = await _project_with_source(session)
+    good_captured_at = NOW - timedelta(days=1)
+    session.add(
+        ProjectSnapshot(
+            project_id=project.id,
+            captured_at=good_captured_at,
+            metrics={
+                "avancement": 40.0,
+                "budget_consomme": 8400.0,
+                "budget_total": 12000.0,
+                "decision_attendue": "Arbitrer le contrat X",
+            },
+            source_modified_at=good_captured_at,
+        )
+    )
+    session.add(
+        ProjectSnapshot(
+            project_id=project.id,
+            captured_at=NOW,
+            metrics=None,
+            error="permission denied",
+        )
+    )
+    await session.commit()
+
+    views = await ProjectService.build_views(session, now=NOW)
+
+    assert len(views) == 1
+    view = views[0]
+    assert view["status"]["level"] == "critical"
+    assert "read failed" in view["status"]["reason"]
+    assert view["error"] == "permission denied"
+    assert view["captured_at"] == NOW
+    assert view["metrics_captured_at"] == good_captured_at
+    assert view["metrics"] == {
+        "avancement": 40.0,
+        "budget_consomme": 8400.0,
+        "budget_total": 12000.0,
+        "decision_attendue": "Arbitrer le contrat X",
+    }
+
+    assert pending_decisions(views) == [
+        {
+            "project_id": project.id,
+            "project_name": project.name,
+            "decision": "Arbitrer le contrat X",
+        }
+    ]
+    assert budget_summary(views) == {
+        "consumed": 8400.0,
+        "total": 12000.0,
+        "remaining": 3600.0,
+        "projects_counted": 1,
+    }
+
+
+async def test_build_views_without_snapshot_is_unknown_not_refreshed_yet(session):
+    # A KPI source link is attached, but the cron hasn't run yet.
     await _project_with_source(session)
 
     views = await ProjectService.build_views(session, now=NOW)
 
     assert views[0]["status"]["level"] == "unknown"
+    assert views[0]["status"]["reason"] == "not refreshed yet"
     assert views[0]["metrics"] is None
     assert views[0]["sparkline"] == []
+
+
+async def test_build_views_without_kpi_source_is_unknown_no_source(session):
+    # No is_kpi_source link at all.
+    session.add(Project(name="No source"))
+    await session.commit()
+
+    views = await ProjectService.build_views(session, now=NOW)
+
+    assert views[0]["status"]["level"] == "unknown"
+    assert views[0]["status"]["reason"] == "no source"
+
+
+async def test_build_views_with_empty_suivi_tab_is_unknown_suivi_empty(session):
+    # A successful read of an empty SUIVI tab: metrics == {}.
+    project = await _project_with_source(session)
+    session.add(
+        ProjectSnapshot(
+            project_id=project.id,
+            captured_at=NOW,
+            metrics={},
+            source_modified_at=NOW,
+        )
+    )
+    await session.commit()
+
+    views = await ProjectService.build_views(session, now=NOW)
+
+    assert views[0]["status"]["level"] == "unknown"
+    assert views[0]["status"]["reason"] == "SUIVI tab is empty"
 
 
 def test_pending_decisions_collects_non_empty_values():

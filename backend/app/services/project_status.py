@@ -21,17 +21,28 @@ def compute_status(
     stale_days: int,
     budget_warn_pct: int,
     now: datetime,
+    has_kpi_source: bool,
+    has_snapshot: bool,
 ) -> dict:
     """Evaluate the status rules in order and return the first match.
 
     Returns {"level": one of the LEVEL_* constants, "reason": short English explanation}.
     A missing metric skips its rule rather than failing.
+
+    `has_kpi_source` and `has_snapshot` disambiguate the three ways a project
+    can end up with no usable metrics: no is_kpi_source link at all, a link
+    attached but never yet refreshed, and a successful read of an empty
+    SUIVI tab (an empty dict is falsy just like None).
     """
     if error:
         return {"level": LEVEL_CRITICAL, "reason": f"read failed: {error}"}
 
     if not metrics:
-        return {"level": LEVEL_UNKNOWN, "reason": "no source"}
+        if not has_kpi_source:
+            return {"level": LEVEL_UNKNOWN, "reason": "no source"}
+        if not has_snapshot:
+            return {"level": LEVEL_UNKNOWN, "reason": "not refreshed yet"}
+        return {"level": LEVEL_UNKNOWN, "reason": "SUIVI tab is empty"}
 
     consumed = _number(metrics.get("budget_consomme"))
     total = _number(metrics.get("budget_total"))

@@ -23,6 +23,8 @@ def status(**overrides):
         "stale_days": 14,
         "budget_warn_pct": 90,
         "now": NOW,
+        "has_kpi_source": True,
+        "has_snapshot": True,
     }
     kwargs.update(overrides)
     return compute_status(**kwargs)
@@ -32,9 +34,32 @@ def test_read_failure_is_critical():
     assert status(metrics=None, error="permission denied")["level"] == LEVEL_CRITICAL
 
 
-def test_no_source_is_unknown():
-    result = status(metrics=None, error=None, source_modified_at=None)
+def test_no_kpi_source_link_is_unknown_no_source():
+    # No is_kpi_source link attached at all.
+    result = status(
+        metrics=None, error=None, source_modified_at=None, has_kpi_source=False, has_snapshot=False
+    )
     assert result["level"] == LEVEL_UNKNOWN
+    assert result["reason"] == "no source"
+
+
+def test_kpi_source_never_refreshed_is_unknown_not_refreshed_yet():
+    # A link is attached but the cron has not run yet: no snapshot exists.
+    result = status(
+        metrics=None, error=None, source_modified_at=None, has_kpi_source=True, has_snapshot=False
+    )
+    assert result["level"] == LEVEL_UNKNOWN
+    assert result["reason"] == "not refreshed yet"
+
+
+def test_kpi_source_refreshed_with_empty_tab_is_unknown_suivi_empty():
+    # A successful read of an empty SUIVI tab: metrics == {} is falsy but a
+    # real snapshot exists.
+    result = status(
+        metrics={}, error=None, source_modified_at=FRESH, has_kpi_source=True, has_snapshot=True
+    )
+    assert result["level"] == LEVEL_UNKNOWN
+    assert result["reason"] == "SUIVI tab is empty"
 
 
 def test_budget_overrun_is_critical():
