@@ -103,6 +103,41 @@ def test_get_modified_time_returns_none_when_absent():
     assert service.get_modified_time("ABC") is None
 
 
+def test_sheets_and_drive_clients_get_a_bounded_http_timeout():
+    # googleapiclient sets no socket timeout by default. refresh_all is
+    # sequential and the scheduler runs with max_instances=1, so one wedged
+    # connection would stop the daily refresh permanently. Both clients must
+    # be built with a bounded httplib2 timeout.
+    valid_key = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "p",
+            "private_key_id": "k",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
+            "client_email": "svc@p.iam.gserviceaccount.com",
+            "client_id": "1",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    )
+    captured = {}
+
+    def fake_build(service_name, version, **kwargs):
+        captured[service_name] = kwargs
+        return MagicMock()
+
+    with (
+        patch("app.services.google_service.Credentials.from_service_account_info"),
+        patch("app.services.google_service.build", side_effect=fake_build),
+    ):
+        GoogleService(valid_key)
+
+    for service_name in ("sheets", "drive"):
+        kwargs = captured[service_name]
+        assert "credentials" not in kwargs  # timeout is set via the http object instead
+        authed_http = kwargs["http"]
+        assert authed_http.http.timeout == 30
+
+
 def test_build_failure_raises_google_access_error():
     valid_key = json.dumps(
         {

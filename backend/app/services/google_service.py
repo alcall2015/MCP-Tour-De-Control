@@ -4,7 +4,9 @@ import json
 import re
 from datetime import datetime, timezone
 
+import httplib2
 from google.oauth2.service_account import Credentials
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 
 from app.utils.suivi_parser import parse_suivi_rows
@@ -13,6 +15,11 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.metadata.readonly",
 ]
+
+# googleapiclient sets no socket timeout by default. refresh_all is sequential
+# and the scheduler runs with max_instances=1, so one wedged connection would
+# otherwise stop the daily refresh permanently until the backend is restarted.
+HTTP_TIMEOUT_SECONDS = 30
 
 SUIVI_RANGE = "SUIVI!A:B"
 
@@ -61,8 +68,14 @@ class GoogleService:
             raise GoogleAccessError(f"invalid service account key: {exc}") from exc
 
         try:
-            self._sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
-            self._drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+            # A bounded httplib2 timeout, passed via the http= kwarg (instead
+            # of credentials=) so a hung connection raises rather than blocking
+            # the refresh run forever.
+            authed_http = AuthorizedHttp(
+                credentials, http=httplib2.Http(timeout=HTTP_TIMEOUT_SECONDS)
+            )
+            self._sheets = build("sheets", "v4", http=authed_http, cache_discovery=False)
+            self._drive = build("drive", "v3", http=authed_http, cache_discovery=False)
         except Exception as exc:
             raise GoogleAccessError(f"cannot build Google API client: {exc}") from exc
 
