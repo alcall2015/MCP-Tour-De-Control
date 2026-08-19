@@ -15,7 +15,9 @@ def build_generation_prompt(user_prompt: str, mcp_servers: list[dict], llm_provi
             if server.get("tools"):
                 servers_section += "Tools:\n"
                 for tool in server["tools"]:
-                    schema_str = json.dumps(tool.get("inputSchema", {}), indent=2)
+                    # McpService emits `input_schema` (McpToolInfo); `inputSchema` is the raw MCP wire name
+                    schema = tool.get("input_schema") or tool.get("inputSchema") or {}
+                    schema_str = json.dumps(schema, indent=2)
                     servers_section += f"- `{tool['name']}`: {tool.get('description', '')} — input: {schema_str}\n"
 
     return f"""You are a Python script generator for MCP Tour De Control.
