@@ -1,23 +1,23 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ProjectCreate(BaseModel):
-    name: str
+    name: str = Field(max_length=200)
     description: str | None = None
     position: int = 0
-    stale_days: int = 14
-    budget_warn_pct: int = 90
+    stale_days: int = Field(default=14, ge=1)
+    budget_warn_pct: int = Field(default=90, ge=1, le=100)
 
 
 class ProjectUpdate(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, max_length=200)
     description: str | None = None
     position: int | None = None
-    stale_days: int | None = None
-    budget_warn_pct: int | None = None
+    stale_days: int | None = Field(default=None, ge=1)
+    budget_warn_pct: int | None = Field(default=None, ge=1, le=100)
 
 
 class ProjectLinkCreate(BaseModel):

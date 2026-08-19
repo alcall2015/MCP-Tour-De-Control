@@ -60,6 +60,41 @@ async def test_create_and_list_project(client):
     assert body[0]["links"] == []
 
 
+async def test_create_project_rejects_name_over_200_chars(client):
+    response = await client.post("/api/v1/projects", json={"name": "x" * 201})
+    assert response.status_code == 422
+
+
+async def test_create_project_rejects_zero_stale_days(client):
+    response = await client.post("/api/v1/projects", json={"name": "P", "stale_days": 0})
+    assert response.status_code == 422
+
+
+async def test_create_project_rejects_out_of_range_budget_warn_pct(client):
+    response = await client.post("/api/v1/projects", json={"name": "P", "budget_warn_pct": 0})
+    assert response.status_code == 422
+
+    response = await client.post("/api/v1/projects", json={"name": "P", "budget_warn_pct": 101})
+    assert response.status_code == 422
+
+
+async def test_update_project_rejects_out_of_range_settings(client):
+    project = (await client.post("/api/v1/projects", json={"name": "P"})).json()
+
+    response = await client.put(f"/api/v1/projects/{project['id']}", json={"stale_days": 0})
+    assert response.status_code == 422
+
+    response = await client.put(
+        f"/api/v1/projects/{project['id']}", json={"budget_warn_pct": 0}
+    )
+    assert response.status_code == 422
+
+    response = await client.put(
+        f"/api/v1/projects/{project['id']}", json={"name": "y" * 201}
+    )
+    assert response.status_code == 422
+
+
 async def test_update_and_delete_project(client):
     created = (await client.post("/api/v1/projects", json={"name": "Tmp"})).json()
 
