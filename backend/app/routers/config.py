@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models import Config
 from app.schemas import ConfigRead, ConfigUpdate
-from app.services.scheduler_service import scheduler_service
+from app.services.scheduler_service import is_valid_cron, scheduler_service
 from app.utils.crypto import encrypt_value
 
 router = APIRouter(prefix="/api/v1/config", tags=["config"])
@@ -41,6 +41,15 @@ async def get_config(session: AsyncSession = Depends(get_async_session)):
 
 @router.put("", response_model=ConfigRead)
 async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_async_session)):
+    # Validate before touching the database or the session, so an invalid
+    # cron expression rejects the whole request without persisting anything
+    # and without leaving the DB and the live scheduler out of sync.
+    if data.projects_cron is not None and not is_valid_cron(data.projects_cron):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid cron expression for projects_cron: {data.projects_cron!r}",
+        )
+
     config = await _get_or_create_config(session)
     if data.llm_provider is not None:
         config.llm_provider = data.llm_provider

@@ -138,6 +138,15 @@ class SchedulerService:
         log.info("Projects job scheduled", cron=cron_expr)
 
 
+def is_valid_cron(cron_expr: str) -> bool:
+    """Return True if cron_expr can be parsed by APScheduler's CronTrigger."""
+    try:
+        CronTrigger.from_crontab(cron_expr)
+        return True
+    except Exception:
+        return False
+
+
 def _make_scheduler_service() -> "SchedulerService":
     """Create the global scheduler service, catching DB errors gracefully."""
     try:

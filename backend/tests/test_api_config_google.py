@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.database import get_async_session
 from app.main import app
 from app.models import Base, Config
+from app.services.scheduler_service import is_valid_cron
 from app.utils.crypto import decrypt_value
 
 TEST_DATABASE_URL = "postgresql+asyncpg://mcp:mcp_secret@localhost:5432/mcp_control_test"
@@ -75,3 +76,60 @@ async def test_changing_cron_reschedules_the_job(client):
     assert response.status_code == 200
     assert response.json()["projects_cron"] == "30 7 * * 1-5"
     scheduler.set_projects_job.assert_called_once_with("30 7 * * 1-5")
+
+
+async def test_unchanged_cron_does_not_reschedule(client):
+    with patch("app.routers.config.scheduler_service") as scheduler:
+        # First set the cron to a known value.
+        first = await client.put("/api/v1/config", json={"projects_cron": "30 7 * * 1-5"})
+        assert first.status_code == 200
+        scheduler.set_projects_job.assert_called_once_with("30 7 * * 1-5")
+        scheduler.reset_mock()
+
+        # PUT the exact same value again: no reschedule should happen.
+        second = await client.put("/api/v1/config", json={"projects_cron": "30 7 * * 1-5"})
+
+    assert second.status_code == 200
+    assert second.json()["projects_cron"] == "30 7 * * 1-5"
+    scheduler.set_projects_job.assert_not_called()
+
+
+async def test_invalid_cron_is_rejected_before_persisting(client, setup_test_db):
+    with patch("app.routers.config.scheduler_service") as scheduler:
+        # Establish a known-good stored value first.
+        setup_response = await client.put("/api/v1/config", json={"projects_cron": "30 7 * * 1-5"})
+        assert setup_response.status_code == 200
+        scheduler.reset_mock()
+
+        response = await client.put("/api/v1/config", json={"projects_cron": "not a cron"})
+
+    assert response.status_code == 422
+    scheduler.set_projects_job.assert_not_called()
+
+    async with setup_test_db() as session:
+        config = (await session.execute(select(Config))).scalar_one()
+        assert config.projects_cron == "30 7 * * 1-5"
+
+
+@pytest.mark.parametrize(
+    "cron_expr",
+    [
+        "0 6 * * *",
+        "30 7 * * 1-5",
+        "*/15 * * * *",
+    ],
+)
+def test_is_valid_cron_accepts_valid_expressions(cron_expr):
+    assert is_valid_cron(cron_expr) is True
+
+
+@pytest.mark.parametrize(
+    "cron_expr",
+    [
+        "not a cron",
+        "99 99 * * *",
+        "",
+    ],
+)
+def test_is_valid_cron_rejects_invalid_expressions(cron_expr):
+    assert is_valid_cron(cron_expr) is False
