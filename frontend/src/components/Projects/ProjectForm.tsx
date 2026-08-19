@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createProject, updateProject, type Project } from "../../lib/api";
+import { MutationError } from "./MutationError";
 
 export function ProjectForm({ project, onDone }: { project?: Project; onDone: () => void }) {
   const queryClient = useQueryClient();
@@ -66,11 +67,7 @@ export function ProjectForm({ project, onDone }: { project?: Project; onDone: ()
             />
           </label>
         </div>
-        {mutation.isError && (
-          <p className="text-xs" style={{ color: "var(--error)" }}>
-            {(mutation.error as Error).message}
-          </p>
-        )}
+        <MutationError error={mutation.error} />
         <div className="flex gap-2">
           <button className="btn-primary" disabled={!name || mutation.isPending} onClick={() => mutation.mutate()}>
             {mutation.isPending ? "Saving..." : "Save"}

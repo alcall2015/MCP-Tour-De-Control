@@ -11,6 +11,7 @@ import {
 import { BudgetSummaryPanel } from "../components/Projects/BudgetSummary";
 import { DecisionsPanel } from "../components/Projects/DecisionsPanel";
 import { LinkForm } from "../components/Projects/LinkForm";
+import { MutationError } from "../components/Projects/MutationError";
 import { ProjectCard } from "../components/Projects/ProjectCard";
 import { ProjectForm } from "../components/Projects/ProjectForm";
 import { Spinner } from "../components/ui/Spinner";
@@ -49,11 +50,7 @@ export function ProjectsPage() {
           New project
         </button>
         <div className="flex items-center gap-3">
-          {refreshMutation.isError && (
-            <span className="text-xs" style={{ color: "var(--error)" }}>
-              {(refreshMutation.error as Error).message}
-            </span>
-          )}
+          <MutationError error={refreshMutation.error} />
           <button
             className="btn-secondary"
             disabled={refreshMutation.isPending}
@@ -63,6 +60,8 @@ export function ProjectsPage() {
           </button>
         </div>
       </div>
+
+      <MutationError error={deleteMutation.error} />
 
       {creating && <ProjectForm onDone={() => setCreating(false)} />}
       {editing && <ProjectForm project={editing} onDone={() => setEditing(null)} />}
@@ -83,7 +82,9 @@ export function ProjectsPage() {
               project={project}
               onEdit={() => setEditing(project)}
               onManageLinks={() => setManagingLinks(project)}
-              onDelete={() => deleteMutation.mutate(project.id)}
+              onDelete={() => {
+                if (!deleteMutation.isPending) deleteMutation.mutate(project.id);
+              }}
             />
           ))}
         </div>

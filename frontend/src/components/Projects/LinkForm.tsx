@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { addProjectLink, deleteProjectLink, type Project } from "../../lib/api";
+import { MutationError } from "./MutationError";
 
 export function LinkForm({ project, onDone }: { project: Project; onDone: () => void }) {
   const queryClient = useQueryClient();
@@ -43,9 +44,10 @@ export function LinkForm({ project, onDone }: { project: Project; onDone: () => 
             <button
               className="text-xs"
               style={{ color: "var(--error)" }}
+              disabled={deleteMutation.isPending && deleteMutation.variables === link.id}
               onClick={() => deleteMutation.mutate(link.id)}
             >
-              Remove
+              {deleteMutation.isPending && deleteMutation.variables === link.id ? "Removing..." : "Remove"}
             </button>
           </li>
         ))}
@@ -72,18 +74,15 @@ export function LinkForm({ project, onDone }: { project: Project; onDone: () => 
           />
           This Sheet carries the SUIVI tab (KPI source)
         </label>
-        {addMutation.isError && (
-          <p className="text-xs" style={{ color: "var(--error)" }}>
-            {(addMutation.error as Error).message}
-          </p>
-        )}
+        <MutationError error={addMutation.error} />
+        <MutationError error={deleteMutation.error} />
         <div className="flex gap-2">
           <button
             className="btn-primary"
             disabled={!label || !url || addMutation.isPending}
             onClick={() => addMutation.mutate()}
           >
-            Add link
+            {addMutation.isPending ? "Adding..." : "Add link"}
           </button>
           <button className="btn-secondary" onClick={onDone}>
             Done

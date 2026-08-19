@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConfig, updateConfig } from "../../lib/api";
+import { MutationError } from "../Projects/MutationError";
 import { Spinner } from "../ui/Spinner";
 
 export function GoogleConfig() {
@@ -64,11 +65,7 @@ export function GoogleConfig() {
             />
           </div>
 
-          {mutation.isError && (
-            <p className="text-xs" style={{ color: "var(--error)" }}>
-              {(mutation.error as Error).message}
-            </p>
-          )}
+          <MutationError error={mutation.error} />
 
           <button
             className="btn-primary"
