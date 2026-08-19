@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import get_async_session
@@ -198,3 +197,52 @@ async def test_project_detail_returns_history(client, setup_test_db):
 async def test_get_unknown_project_returns_404(client):
     response = await client.get(f"/api/v1/projects/{uuid.uuid4()}")
     assert response.status_code == 404
+
+
+async def test_update_unknown_link_returns_404(client):
+    response = await client.put(
+        f"/api/v1/projects/links/{uuid.uuid4()}", json={"label": "Renamed"}
+    )
+    assert response.status_code == 404
+
+
+async def test_delete_unknown_link_returns_404(client):
+    response = await client.delete(f"/api/v1/projects/links/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+async def test_update_unknown_project_returns_404(client):
+    response = await client.put(
+        f"/api/v1/projects/{uuid.uuid4()}", json={"name": "Renamed"}
+    )
+    assert response.status_code == 404
+
+
+async def test_delete_unknown_project_returns_404(client):
+    response = await client.delete(f"/api/v1/projects/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+async def test_add_link_to_unknown_project_returns_404(client):
+    response = await client.post(
+        f"/api/v1/projects/{uuid.uuid4()}/links",
+        json={"label": "Doc", "url": "https://docs.google.com/document/d/D1/edit"},
+    )
+    assert response.status_code == 404
+
+
+async def test_refresh_unknown_project_returns_404(client):
+    response = await client.post(f"/api/v1/projects/{uuid.uuid4()}/refresh")
+    assert response.status_code == 404
+
+
+async def test_refresh_project_without_kpi_source_returns_zero(client):
+    project = (await client.post("/api/v1/projects", json={"name": "P"})).json()
+
+    with patch(
+        "app.routers.projects.ProjectService.refresh_one", new=AsyncMock(return_value=False)
+    ):
+        response = await client.post(f"/api/v1/projects/{project['id']}/refresh")
+
+    assert response.status_code == 200
+    assert response.json() == {"refreshed": 0}

@@ -4,7 +4,6 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.database import get_async_session
 from app.models import Project, ProjectLink, ProjectSnapshot
@@ -44,7 +43,10 @@ async def create_project(data: ProjectCreate, session: AsyncSession = Depends(ge
     await session.refresh(project)
 
     views = await ProjectService.build_views(session)
-    return next(view for view in views if view["id"] == project.id)
+    view = next((v for v in views if v["id"] == project.id), None)
+    if view is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return view
 
 
 @router.get("/decisions", response_model=list[PendingDecision])
@@ -128,7 +130,10 @@ async def update_project(
     await session.commit()
 
     views = await ProjectService.build_views(session)
-    return next(view for view in views if view["id"] == project_id)
+    view = next((v for v in views if v["id"] == project_id), None)
+    if view is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return view
 
 
 @router.delete("/{project_id}", status_code=204)
@@ -142,6 +147,10 @@ async def delete_project(project_id: uuid.UUID, session: AsyncSession = Depends(
 
 @router.post("/{project_id}/refresh", response_model=RefreshResult)
 async def refresh_project(project_id: uuid.UUID, session: AsyncSession = Depends(get_async_session)):
+    project = await session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     try:
         written = await ProjectService.refresh_one(session, project_id)
     except GoogleAccessError as exc:
