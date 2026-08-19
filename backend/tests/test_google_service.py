@@ -1,3 +1,4 @@
+import json
 import os
 
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
@@ -91,3 +92,32 @@ def test_get_modified_time_parses_rfc3339():
 def test_invalid_service_account_key_raises():
     with pytest.raises(GoogleAccessError):
         GoogleService("{not valid json")
+
+
+def test_get_modified_time_returns_none_when_absent():
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+    drive.files.return_value.get.return_value.execute.return_value = {}
+    service._drive = drive
+
+    assert service.get_modified_time("ABC") is None
+
+
+def test_build_failure_raises_google_access_error():
+    valid_key = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "p",
+            "private_key_id": "k",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
+            "client_email": "svc@p.iam.gserviceaccount.com",
+            "client_id": "1",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    )
+    with (
+        patch("app.services.google_service.Credentials.from_service_account_info"),
+        patch("app.services.google_service.build", side_effect=RuntimeError("discovery unreachable")),
+    ):
+        with pytest.raises(GoogleAccessError):
+            GoogleService(valid_key)

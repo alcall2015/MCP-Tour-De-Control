@@ -4,13 +4,10 @@ import json
 import re
 from datetime import datetime, timezone
 
-import structlog
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
 from app.utils.suivi_parser import parse_suivi_rows
-
-log = structlog.get_logger()
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -63,8 +60,11 @@ class GoogleService:
         except Exception as exc:
             raise GoogleAccessError(f"invalid service account key: {exc}") from exc
 
-        self._sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
-        self._drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+        try:
+            self._sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+            self._drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+        except Exception as exc:
+            raise GoogleAccessError(f"cannot build Google API client: {exc}") from exc
 
     def read_suivi(self, file_id: str) -> dict:
         """Read SUIVI!A:B and return the parsed metrics dict."""
