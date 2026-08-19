@@ -5,6 +5,7 @@ import { listPrompts, listMcpServers } from "../../lib/api";
 const tabs = [
   { to: "/", label: "Prompts" },
   { to: "/reports", label: "Reports" },
+  { to: "/projects", label: "Projects" },
   { to: "/stress-call", label: "Stress Call" },
   { to: "/chat", label: "Chat" },
   { to: "/config", label: "Config" },
