@@ -33,7 +33,17 @@ function relativeDate(iso: string | null): string {
   return `${days} days ago`;
 }
 
-export function ProjectCard({ project }: { project: Project }) {
+export function ProjectCard({
+  project,
+  onEdit,
+  onManageLinks,
+  onDelete,
+}: {
+  project: Project;
+  onEdit?: () => void;
+  onManageLinks?: () => void;
+  onDelete?: () => void;
+}) {
   const metrics = project.metrics ?? {};
   const consumed = metrics.budget_consomme;
   const total = metrics.budget_total;
@@ -133,6 +143,26 @@ export function ProjectCard({ project }: { project: Project }) {
         Last read {relativeDate(project.captured_at)}
         {project.source_modified_at && ` · file modified ${relativeDate(project.source_modified_at)}`}
       </p>
+
+      {(onEdit || onManageLinks || onDelete) && (
+        <div className="mt-3 flex gap-3 border-t pt-3" style={{ borderColor: "var(--border)" }}>
+          {onEdit && (
+            <button className="text-xs" style={{ color: "var(--text-secondary)" }} onClick={onEdit}>
+              Edit
+            </button>
+          )}
+          {onManageLinks && (
+            <button className="text-xs" style={{ color: "var(--text-secondary)" }} onClick={onManageLinks}>
+              Links
+            </button>
+          )}
+          {onDelete && (
+            <button className="text-xs" style={{ color: "var(--error)" }} onClick={onDelete}>
+              Delete
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
