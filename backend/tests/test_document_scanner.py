@@ -157,3 +157,42 @@ async def test_missing_key_raises(session):
 
     with pytest.raises(GoogleAccessError):
         await DocumentScanner.scan_all(session)
+
+
+async def test_failed_rescan_preserves_last_good_content(session):
+    """Verify that when a read fails, stored content is preserved and last_error is set."""
+    await _configured(session)
+
+    # First scan: succeeds
+    with patch("app.services.document_scanner.GoogleService", return_value=_google([_doc()], text="a\nb\nc")):
+        await DocumentScanner.scan_all(session)
+
+    # Verify content is stored, no activity yet (first sighting)
+    content = (await session.execute(select(DocumentContent))).scalar_one()
+    assert content.text == "a\nb\nc"
+    assert (await session.execute(select(DocumentActivity))).scalars().all() == []
+
+    # Second scan: fails with permission error
+    with patch("app.services.document_scanner.GoogleService", return_value=_google([_doc()], export_error="permission denied")):
+        await DocumentScanner.scan_all(session)
+
+    # Verify stored content is UNCHANGED
+    content = (await session.execute(select(DocumentContent))).scalar_one()
+    assert content.text == "a\nb\nc", "stored content must be preserved on read failure"
+
+    # Verify last_error is set
+    doc = (await session.execute(select(TrackedDocument))).scalar_one()
+    assert "permission denied" in (doc.last_error or ""), "last_error must record the failure"
+
+    # Verify no activity row was created by the failed scan
+    assert (await session.execute(select(DocumentActivity))).scalars().all() == [], \
+        "no activity should be recorded when extraction fails"
+
+    # Third scan: succeeds with slightly different text
+    with patch("app.services.document_scanner.GoogleService", return_value=_google([_doc()], text="a\nb\nc\nd")):
+        await DocumentScanner.scan_all(session)
+
+    # Verify the diff is measured against the preserved content from step 1, not empty
+    activity = (await session.execute(select(DocumentActivity))).scalar_one()
+    assert activity.added == 1, "diff should show 1 line added (not 4), proving content was preserved"
+    assert activity.removed == 0
