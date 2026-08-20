@@ -14,7 +14,7 @@ export function GoogleConfig() {
     mutationFn: () =>
       updateConfig({
         google_sa_key: saKey || undefined,
-        projects_cron: cron ?? undefined,
+        activity_cron: cron ?? undefined,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["config"] });
@@ -65,7 +65,7 @@ export function GoogleConfig() {
             </label>
             <input
               className="input-field"
-              value={cron ?? config?.projects_cron ?? "0 6 * * *"}
+              value={cron ?? config?.activity_cron ?? "0 6 * * *"}
               onChange={(event) => setCron(event.target.value)}
             />
           </div>

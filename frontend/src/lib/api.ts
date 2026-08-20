@@ -88,14 +88,16 @@ export interface Config {
   updated_at: string;
   google_sa_key_set: boolean;
   google_sa_email: string | null;
-  projects_cron: string;
+  drive_folder_id: string;
+  activity_cron: string;
 }
 export interface ConfigUpdate {
   llm_provider?: string;
   llm_model?: string;
   api_key?: string;
   google_sa_key?: string;
-  projects_cron?: string;
+  drive_folder_id?: string;
+  activity_cron?: string;
 }
 export interface McpServer {
   id: string;
@@ -247,100 +249,6 @@ export interface ScenarioInfo {
   description: string;
   type: string;
 }
-
-// Projects
-export type ProjectStatusLevel = "critical" | "attention" | "nominal" | "unknown";
-
-export interface ProjectStatus {
-  level: ProjectStatusLevel;
-  reason: string;
-}
-
-export interface ProjectLink {
-  id: string;
-  label: string;
-  url: string;
-  kind: "doc" | "sheet" | "slide" | "drive" | "other";
-  is_kpi_source: boolean;
-  position: number;
-}
-
-export interface Project {
-  id: string;
-  name: string;
-  description: string | null;
-  position: number;
-  stale_days: number;
-  budget_warn_pct: number;
-  links: ProjectLink[];
-  status: ProjectStatus;
-  metrics: Record<string, number | string> | null;
-  trends: Record<string, number>;
-  sparkline: number[];
-  captured_at: string | null;
-  metrics_captured_at: string | null;
-  source_modified_at: string | null;
-  error: string | null;
-}
-
-export interface ProjectSnapshot {
-  captured_at: string;
-  metrics: Record<string, number | string> | null;
-  error: string | null;
-}
-
-export interface ProjectDetail extends Project {
-  history: ProjectSnapshot[];
-}
-
-export interface ProjectCreate {
-  name: string;
-  description?: string | null;
-  position?: number;
-  stale_days?: number;
-  budget_warn_pct?: number;
-}
-
-export interface ProjectLinkCreate {
-  label: string;
-  url: string;
-  is_kpi_source?: boolean;
-  position?: number;
-}
-
-export interface PendingDecision {
-  project_id: string;
-  project_name: string;
-  decision: string;
-}
-
-export interface BudgetSummary {
-  consumed: number;
-  total: number;
-  remaining: number;
-  projects_counted: number;
-}
-
-export const listProjects = () => request<Project[]>("/projects");
-export const getProject = (id: string) => request<ProjectDetail>(`/projects/${id}`);
-export const createProject = (data: ProjectCreate) =>
-  request<Project>("/projects", { method: "POST", body: JSON.stringify(data) });
-export const updateProject = (id: string, data: Partial<ProjectCreate>) =>
-  request<Project>(`/projects/${id}`, { method: "PUT", body: JSON.stringify(data) });
-export const deleteProject = (id: string) =>
-  request<void>(`/projects/${id}`, { method: "DELETE" });
-export const addProjectLink = (projectId: string, data: ProjectLinkCreate) =>
-  request<ProjectLink>(`/projects/${projectId}/links`, { method: "POST", body: JSON.stringify(data) });
-export const updateProjectLink = (linkId: string, data: Partial<ProjectLinkCreate>) =>
-  request<ProjectLink>(`/projects/links/${linkId}`, { method: "PUT", body: JSON.stringify(data) });
-export const deleteProjectLink = (linkId: string) =>
-  request<void>(`/projects/links/${linkId}`, { method: "DELETE" });
-export const refreshProjects = () =>
-  request<{ refreshed: number }>("/projects/refresh", { method: "POST" });
-export const refreshProject = (id: string) =>
-  request<{ refreshed: number }>(`/projects/${id}/refresh`, { method: "POST" });
-export const listDecisions = () => request<PendingDecision[]>("/projects/decisions");
-export const getBudgetSummary = () => request<BudgetSummary>("/projects/summary");
 
 // Chat
 export const listConversations = () => request<Conversation[]>("/chat/conversations");

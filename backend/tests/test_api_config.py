@@ -45,7 +45,7 @@ async def test_get_config_returns_default():
     assert "api_key" not in data  # key must never be exposed
     assert "google_sa_key_set" in data
     assert "google_sa_key" not in data  # key must never be exposed
-    assert "projects_cron" in data
+    assert "activity_cron" in data
 
 
 @pytest.mark.asyncio

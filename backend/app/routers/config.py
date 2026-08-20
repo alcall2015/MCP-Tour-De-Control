@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_async_session
 from app.models import Config
 from app.schemas import ConfigRead, ConfigUpdate
+from app.services.google_service import parse_file_id
 from app.services.scheduler_service import is_valid_cron, scheduler_service
 from app.utils.crypto import decrypt_value, encrypt_value
 
@@ -49,7 +50,8 @@ def _to_read(config: Config) -> ConfigRead:
         api_key_set=bool(config.api_key),
         google_sa_key_set=bool(config.google_sa_key),
         google_sa_email=_google_sa_email(config),
-        projects_cron=config.projects_cron,
+        drive_folder_id=config.drive_folder_id,
+        activity_cron=config.activity_cron,
         updated_at=config.updated_at,
     )
 
@@ -64,10 +66,10 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
     # Validate before touching the database or the session, so an invalid
     # cron expression rejects the whole request without persisting anything
     # and without leaving the DB and the live scheduler out of sync.
-    if data.projects_cron is not None and not is_valid_cron(data.projects_cron):
+    if data.activity_cron is not None and not is_valid_cron(data.activity_cron):
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid cron expression for projects_cron: {data.projects_cron!r}",
+            detail=f"Invalid cron expression for activity_cron: {data.activity_cron!r}",
         )
 
     config = await _get_or_create_config(session)
@@ -79,15 +81,17 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
         config.api_key = encrypt_value(data.api_key)
     if data.google_sa_key is not None:
         config.google_sa_key = encrypt_value(data.google_sa_key)
+    if data.drive_folder_id is not None:
+        config.drive_folder_id = parse_file_id(data.drive_folder_id) or data.drive_folder_id
 
-    cron_changed = data.projects_cron is not None and data.projects_cron != config.projects_cron
-    if data.projects_cron is not None:
-        config.projects_cron = data.projects_cron
+    cron_changed = data.activity_cron is not None and data.activity_cron != config.activity_cron
+    if data.activity_cron is not None:
+        config.activity_cron = data.activity_cron
 
     await session.commit()
     await session.refresh(config)
 
     if cron_changed:
-        scheduler_service.set_projects_job(config.projects_cron)
+        scheduler_service.set_activity_job(config.activity_cron)
 
     return _to_read(config)

@@ -11,7 +11,6 @@ from app.routers import chat as chat_router
 from app.routers import config as config_router
 from app.routers import executions as executions_router
 from app.routers import mcp_servers as mcp_servers_router
-from app.routers import projects as projects_router
 from app.routers import prompts as prompts_router
 from app.routers import scripts as scripts_router
 from app.routers import stress_tests as stress_tests_router
@@ -43,17 +42,17 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.error("Failed to restore cron jobs from DB", error=str(exc))
 
-    # Schedule the daily projects refresh from the stored cron expression
+    # Schedule the daily activity scan from the stored cron expression
     try:
         async with async_session() as session:
             from app.models import Config
 
             config = (await session.execute(select(Config).limit(1))).scalar_one_or_none()
-            cron_expr = config.projects_cron if config else "0 6 * * *"
-            scheduler_service.set_projects_job(cron_expr)
-            log.info("Projects refresh scheduled", cron=cron_expr)
+            cron_expr = config.activity_cron if config else "0 6 * * *"
+            scheduler_service.set_activity_job(cron_expr)
+            log.info("Activity scan scheduled", cron=cron_expr)
     except Exception as exc:
-        log.error("Failed to schedule projects refresh", error=str(exc))
+        log.error("Failed to schedule activity scan", error=str(exc))
 
     # Auto-register or update sipp-stress MCP server
     try:
@@ -104,7 +103,6 @@ app.include_router(prompts_router.router)
 app.include_router(scripts_router.router)
 app.include_router(stress_tests_router.router)
 app.include_router(chat_router.router)
-app.include_router(projects_router.router)
 
 
 @app.get("/health")

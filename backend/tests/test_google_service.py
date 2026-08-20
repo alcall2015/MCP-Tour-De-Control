@@ -45,39 +45,6 @@ def test_detect_kind(url, expected):
     assert detect_kind(url) == expected
 
 
-def test_read_suivi_parses_rows():
-    service = GoogleService.__new__(GoogleService)
-    sheets = MagicMock()
-    sheets.spreadsheets.return_value.values.return_value.get.return_value.execute.return_value = {
-        "values": [["avancement", "72"], ["budget_total", "12000"]]
-    }
-    service._sheets = sheets
-
-    assert service.read_suivi("ABC") == {"avancement": 72.0, "budget_total": 12000.0}
-
-
-def test_read_suivi_empty_tab_returns_empty_dict():
-    service = GoogleService.__new__(GoogleService)
-    sheets = MagicMock()
-    sheets.spreadsheets.return_value.values.return_value.get.return_value.execute.return_value = {}
-    service._sheets = sheets
-
-    assert service.read_suivi("ABC") == {}
-
-
-def test_read_suivi_wraps_api_errors():
-    service = GoogleService.__new__(GoogleService)
-    sheets = MagicMock()
-    sheets.spreadsheets.return_value.values.return_value.get.return_value.execute.side_effect = RuntimeError(
-        "Unable to parse range: SUIVI!A:B"
-    )
-    service._sheets = sheets
-
-    with pytest.raises(GoogleAccessError) as exc:
-        service.read_suivi("ABC")
-    assert "SUIVI" in str(exc.value)
-
-
 def test_get_modified_time_parses_rfc3339():
     service = GoogleService.__new__(GoogleService)
     drive = MagicMock()

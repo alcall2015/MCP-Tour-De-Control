@@ -18,7 +18,8 @@ class Config(Base):
     llm_model: Mapped[str] = mapped_column(String(100), default="gpt-4")
     api_key: Mapped[str] = mapped_column(String(500), default="")
     google_sa_key: Mapped[str] = mapped_column(Text, default="")
-    projects_cron: Mapped[str] = mapped_column(String(100), default="0 6 * * *")
+    drive_folder_id: Mapped[str] = mapped_column(String(100), default="")
+    activity_cron: Mapped[str] = mapped_column(String(100), default="0 6 * * *")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )

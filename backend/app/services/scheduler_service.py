@@ -44,18 +44,18 @@ async def _execute_prompt_job(prompt_id: str):
         log.info("Cron job completed", prompt_id=prompt_id, status=execution.status)
 
 
-async def _execute_projects_refresh():
-    """Callback executed by APScheduler to refresh every project's indicators."""
+async def _execute_activity_scan():
+    """Callback executed by APScheduler to rescan the tracked Drive folder."""
     from app.database import async_session
-    from app.services.project_service import ProjectService
+    from app.services.document_scanner import DocumentScanner
 
-    log.info("Projects refresh triggered")
+    log.info("Activity scan triggered")
     try:
         async with async_session() as session:
-            count = await ProjectService.refresh_all(session)
-        log.info("Projects refresh completed", count=count)
+            count = await DocumentScanner.scan_all(session)
+        log.info("Activity scan completed", documents=count)
     except Exception as exc:
-        log.error("Projects refresh failed", error=str(exc))
+        log.error("Activity scan failed", error=str(exc))
 
 
 class SchedulerService:
@@ -125,17 +125,17 @@ class SchedulerService:
             log.warning("Job not found for reschedule, adding instead", job_id=job_id)
             self.add_job(prompt_id, cron_expr)
 
-    PROJECTS_JOB_ID = "projects_refresh"
+    ACTIVITY_JOB_ID = "activity_scan"
 
-    def set_projects_job(self, cron_expr: str):
-        """Create or reschedule the daily projects refresh."""
+    def set_activity_job(self, cron_expr: str):
+        """Create or reschedule the daily activity scan."""
         self.scheduler.add_job(
-            _execute_projects_refresh,
+            _execute_activity_scan,
             trigger=CronTrigger.from_crontab(cron_expr),
-            id=self.PROJECTS_JOB_ID,
+            id=self.ACTIVITY_JOB_ID,
             replace_existing=True,
         )
-        log.info("Projects job scheduled", cron=cron_expr)
+        log.info("Activity job scheduled", cron=cron_expr)
 
 
 def is_valid_cron(cron_expr: str) -> bool:
