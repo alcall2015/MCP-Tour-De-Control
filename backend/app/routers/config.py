@@ -82,7 +82,15 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
     if data.google_sa_key is not None:
         config.google_sa_key = encrypt_value(data.google_sa_key)
     if data.drive_folder_id is not None:
-        config.drive_folder_id = parse_file_id(data.drive_folder_id) or data.drive_folder_id
+        parsed = parse_file_id(data.drive_folder_id)
+        value = parsed or data.drive_folder_id
+        max_len = Config.drive_folder_id.type.length
+        if parsed is None and len(value) > max_len:
+            raise HTTPException(
+                status_code=422,
+                detail=f"drive_folder_id: could not extract a folder id and the value exceeds {max_len} characters",
+            )
+        config.drive_folder_id = value
 
     cron_changed = data.activity_cron is not None and data.activity_cron != config.activity_cron
     if data.activity_cron is not None:

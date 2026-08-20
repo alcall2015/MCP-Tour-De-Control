@@ -202,3 +202,39 @@ def test_is_valid_cron_accepts_valid_expressions(cron_expr):
 )
 def test_is_valid_cron_rejects_invalid_expressions(cron_expr):
     assert is_valid_cron(cron_expr) is False
+
+
+async def test_pasted_folder_url_is_stored_as_bare_id(client, setup_test_db):
+    response = await client.put(
+        "/api/v1/config",
+        json={"drive_folder_id": "https://drive.google.com/drive/folders/1AbC_dEf-GHi?usp=drive_link"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["drive_folder_id"] == "1AbC_dEf-GHi"
+
+    async with setup_test_db() as session:
+        config = (await session.execute(select(Config))).scalar_one()
+        assert config.drive_folder_id == "1AbC_dEf-GHi"
+
+
+async def test_bare_folder_id_is_stored_unchanged(client, setup_test_db):
+    response = await client.put("/api/v1/config", json={"drive_folder_id": "1AbC_dEf-GHi"})
+
+    assert response.status_code == 200
+    assert response.json()["drive_folder_id"] == "1AbC_dEf-GHi"
+
+
+async def test_unparsable_overlong_folder_value_is_rejected_with_422(client, setup_test_db):
+    # An unparsable value that would overflow the String(100) column must be
+    # rejected explicitly rather than left to raise a 500 from asyncpg.
+    overlong = "https://example.com/not-a-drive-url/" + ("x" * 100)
+
+    response = await client.put("/api/v1/config", json={"drive_folder_id": overlong})
+
+    assert response.status_code == 422
+    assert "drive_folder_id" in response.json()["detail"]
+
+    async with setup_test_db() as session:
+        config = (await session.execute(select(Config))).scalar_one_or_none()
+        assert config is None or config.drive_folder_id == ""
