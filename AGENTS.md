@@ -15,7 +15,7 @@ On top of that core loop there are three more features:
 
 - **Stress Call**: SIP load testing. A dedicated MCP server (`sipp-stress/`) wraps the SIPp binary; the backend drives it through the MCP protocol and polls SIP/RTP metrics (ASR, PDD, CPS, jitter, MOS...).
 - **Chat**: a conversational assistant (its system prompt is in French — it answers in French) that can call MCP tools live and generate scripts, streamed over SSE.
-- **Projects**: director dashboard. Google Docs/Sheets links grouped by project, with indicators read daily from a `SUIVI` key/value tab in each project's Sheet through a Google service account, stored as snapshots for trend display.
+- **Activity**: director dashboard. One shared Drive folder is walked daily; every Google Doc and Sheet inside it is exported to text, diffed line-by-line against the previous run, and the daily added/removed counts feed a GitHub-style contribution grid. Only the latest text is stored, so history stays complete while storage stays bounded.
 
 Authoritative design docs live in `docs/superpowers/specs/` and implementation plans in `docs/superpowers/plans/`. Read those before large changes.
 
@@ -40,7 +40,7 @@ Three independently buildable components plus a compose file:
 │   ├── test_mcp_server.py  standalone FastMCP server with 4 dummy tools for end-to-end testing
 │   └── requirements.txt    pinned deps (no pyproject.toml)
 ├── frontend/         React SPA
-│   ├── src/pages/          one file per tab: Prompts, Reports, StressCall, Chat, Projects, Config
+│   ├── src/pages/          one file per tab: Prompts, Reports, StressCall, Chat, Activity, Config
 │   ├── src/components/     grouped by feature (Chat/, Config/, Prompts/, Reports/, StressCall/, Layout/, ui/)
 │   ├── src/lib/api.ts      ALL backend calls + shared TypeScript interfaces live here
 │   └── vite.config.ts      dev server on :3000, proxies /api → http://localhost:8000
@@ -93,6 +93,8 @@ PYTHONPATH=. venv/bin/alembic revision --autogenerate -m "describe change"
 ```
 
 Config via env vars or `backend/.env` (see `backend/.env.example`): `DATABASE_URL`, `ENCRYPTION_KEY` (generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`), `DEFAULT_SCRIPT_TIMEOUT` (default 300s), `SIPP_MCP_URL`.
+
+**`alembic revision --autogenerate` gotcha:** in this repo it reliably proposes dropping `apscheduler_jobs` and `ix_chat_message_conversation_id` — both wrong, strip them from every generated migration before committing it. `apscheduler_jobs` belongs to APScheduler's runtime jobstore, not the app's declared models; dropping it destroys every persisted cron job. This has bitten three separate tasks — check the generated migration by hand every time.
 
 ### Backend tests
 

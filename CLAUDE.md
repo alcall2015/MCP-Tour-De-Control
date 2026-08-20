@@ -28,6 +28,8 @@ python3 -m pytest tests/          # pure parsing tests, no SIPp binary needed
 
 Backend tests need a live Postgres at `localhost:5432` (`mcp`/`mcp_secret`) with a `mcp_control_test` database; `tests/conftest.py` creates and drops the tables per test. `pytest.ini` sets `asyncio_mode = auto`. There is no frontend test suite — lint + build are the checks.
 
+`alembic revision --autogenerate` in this repo always proposes dropping `apscheduler_jobs` and `ix_chat_message_conversation_id`. Both are wrong — strip them from the generated migration before applying it. `apscheduler_jobs` is APScheduler's own runtime jobstore table, invisible to the app's declared models; dropping it wipes every persisted cron job. See AGENTS.md for the full explanation.
+
 Backend env (`backend/.env` or process env): `DATABASE_URL`, `ENCRYPTION_KEY` (Fernet, generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`), `DEFAULT_SCRIPT_TIMEOUT`, `SIPP_MCP_URL`.
 
 ## Architecture
@@ -51,6 +53,10 @@ This is arbitrary code execution by design — there is no sandbox, and the subp
 ### Chat
 
 `POST /chat/conversations/{id}/messages` returns a `StreamingResponse` of SSE frames built by `_sse()` in `chat_service.py`; event names are `text`, `tool_call`, `tool_result`, `error`, `done`. Tool definitions come from every enabled MCP server, flattened into one namespace (`tool_name → server` map), with `_clean_schema()` stripping `default`/`additionalProperties`/`anyOf`/`title` because Gemini rejects them. History is capped at `MAX_HISTORY` messages and tool results at `MAX_TOOL_RESULT_LEN`. The system prompt is French and the assistant answers in French — preserve that.
+
+### Activity
+
+A director dashboard, populated by a daily cron rather than user action. `DocumentScanner.scan_all()` (`document_scanner.py`, writes only) walks one shared Drive folder via a Google service account, exports each Doc/Sheet to plain text, and diffs it line-by-line against the text stored from the previous run (`utils/line_diff.py`). Added/removed line counts accumulate into a per-document, per-day `DocumentActivity` row — a same-day rescan adds to today's row rather than replacing it, so a morning scan's work survives an afternoon one. Only the latest extracted text is kept (`DocumentContent`, one row per document): full history of *counts* is preserved but full history of *content* is not, which is what keeps storage bounded. A document's first sighting is stored as a baseline with no diff, so a pre-existing file never appears as a false spike of "added" lines. `ActivityView` (`activity_view.py`, reads only) is the read model: `sections()` groups tracked documents for the document list, and `heatmap()` builds the GitHub-style contribution grid, aligning its first day on the Monday 52 weeks back so the grid never renders a partial leading column. Google access errors (`GoogleAccessError`, e.g. no service account key or no folder configured) are caught at the router and translated to `400`, not left to escape as `500`. Google scopes are `spreadsheets.readonly` and `drive.readonly` — the latter is what makes exporting Doc/Sheet content possible, not just listing filenames.
 
 ### Stress Call
 
