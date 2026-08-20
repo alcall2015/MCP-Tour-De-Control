@@ -148,6 +148,17 @@ def test_list_children_follows_pagination_across_pages():
     assert calls[1].kwargs["pageToken"] == "PAGE2"
 
 
+def test_list_children_wraps_api_errors():
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+    drive.files.return_value.list.return_value.execute.side_effect = RuntimeError("403 insufficient permissions")
+    service._drive = drive
+
+    with pytest.raises(GoogleAccessError) as exc:
+        service.list_folder_tree("ROOT", max_files=100)
+    assert "ROOT" in str(exc.value)
+
+
 def test_list_folder_tree_reports_what_the_cap_skipped():
     service = GoogleService.__new__(GoogleService)
     drive = MagicMock()
