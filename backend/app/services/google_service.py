@@ -5,11 +5,14 @@ import re
 from datetime import datetime, timezone
 
 import httplib2
+import structlog
 from google.oauth2.service_account import Credentials
 from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 
 from app.services.text_extractor import FOLDER_MIME
+
+log = structlog.get_logger()
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -103,13 +106,19 @@ class GoogleService:
         while queue:
             parent, section = queue.pop(0)
             for entry in self._list_children(parent):
+                entry_id = entry.get("id")
+                if entry_id is None:
+                    # An entry we can't identify can't be tracked (deduped, queued,
+                    # or returned) at all, so drop it rather than crash the walk.
+                    log.warning("Drive entry missing id, skipping", parent=parent)
+                    continue
                 if entry.get("mimeType") == FOLDER_MIME:
                     # The first subfolder level names the section; deeper folders inherit it.
-                    queue.append((entry["id"], section or entry.get("name")))
+                    queue.append((entry_id, section or entry.get("name")))
                 elif len(files) < max_files:
                     files.append(
                         {
-                            "id": entry["id"],
+                            "id": entry_id,
                             "name": entry.get("name", ""),
                             "mimeType": entry.get("mimeType", ""),
                             "webViewLink": entry.get("webViewLink", ""),
@@ -150,9 +159,9 @@ class GoogleService:
         """Export a Google Doc as plain text."""
         try:
             data = self._drive.files().export(fileId=file_id, mimeType="text/plain").execute()
+            return data.decode("utf-8") if isinstance(data, bytes) else str(data)
         except Exception as exc:
             raise GoogleAccessError(f"cannot export {file_id} as text: {exc}") from exc
-        return data.decode("utf-8") if isinstance(data, bytes) else str(data)
 
     def read_all_tabs(self, file_id: str) -> list[tuple[str, list[list]]]:
         """Every tab of a spreadsheet as (title, rows).

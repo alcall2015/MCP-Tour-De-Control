@@ -116,6 +116,38 @@ def test_list_folder_tree_assigns_the_top_subfolder_as_section():
     assert by_id["F1"]["section"] == "Soutien-Scolaire"
 
 
+def test_list_children_follows_pagination_across_pages():
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+
+    first_page = {
+        "files": [{"id": "F1", "name": "doc 1", "mimeType": DOC_MIME, "webViewLink": "u1"}],
+        "nextPageToken": "PAGE2",
+    }
+    second_page = {
+        "files": [{"id": "F2", "name": "doc 2", "mimeType": DOC_MIME, "webViewLink": "u2"}],
+    }
+    responses = [first_page, second_page]
+
+    def list_call(q, fields, pageSize, pageToken):
+        page = MagicMock()
+        page.execute.return_value = responses.pop(0)
+        return page
+
+    drive.files.return_value.list.side_effect = list_call
+    service._drive = drive
+
+    entries = service._list_children("ROOT")
+
+    ids = {e["id"] for e in entries}
+    assert ids == {"F1", "F2"}
+
+    calls = drive.files.return_value.list.call_args_list
+    assert len(calls) == 2
+    assert calls[0].kwargs["pageToken"] is None
+    assert calls[1].kwargs["pageToken"] == "PAGE2"
+
+
 def test_list_folder_tree_reports_what_the_cap_skipped():
     service = GoogleService.__new__(GoogleService)
     drive = MagicMock()
@@ -133,3 +165,90 @@ def test_list_folder_tree_reports_what_the_cap_skipped():
 
     assert len(files) == 4
     assert skipped == 6
+
+
+def test_list_folder_tree_returns_every_field_with_an_author():
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+    page = MagicMock()
+    page.execute.return_value = {
+        "files": [
+            {
+                "id": "F1",
+                "name": "Note racine",
+                "mimeType": DOC_MIME,
+                "webViewLink": "https://docs.google.com/document/d/F1/edit",
+                "modifiedTime": "2026-08-17T10:00:00Z",
+                "lastModifyingUser": {"displayName": "Fabien"},
+            }
+        ]
+    }
+    drive.files.return_value.list.return_value = page
+    service._drive = drive
+
+    files, skipped = service.list_folder_tree("ROOT", max_files=100)
+
+    assert skipped == 0
+    assert len(files) == 1
+    assert files[0] == {
+        "id": "F1",
+        "name": "Note racine",
+        "mimeType": DOC_MIME,
+        "webViewLink": "https://docs.google.com/document/d/F1/edit",
+        "modifiedTime": "2026-08-17T10:00:00Z",
+        "author": "Fabien",
+        "section": None,
+    }
+
+
+def test_list_folder_tree_author_is_none_when_last_modifying_user_absent():
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+    page = MagicMock()
+    page.execute.return_value = {
+        "files": [
+            {
+                "id": "F1",
+                "name": "Note racine",
+                "mimeType": DOC_MIME,
+                "webViewLink": "u1",
+                "modifiedTime": "2026-08-17T10:00:00Z",
+            }
+        ]
+    }
+    drive.files.return_value.list.return_value = page
+    service._drive = drive
+
+    files, _ = service.list_folder_tree("ROOT", max_files=100)
+
+    assert files[0]["author"] is None
+
+
+def test_export_text_raises_google_access_error_on_invalid_utf8():
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+    drive.files.return_value.export.return_value.execute.return_value = b"\xff\xfe invalid"
+    service._drive = drive
+
+    with pytest.raises(GoogleAccessError) as exc:
+        service.export_text("DOC1")
+    assert "DOC1" in str(exc.value)
+
+
+def test_list_folder_tree_skips_entries_missing_id():
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+    page = MagicMock()
+    page.execute.return_value = {
+        "files": [
+            {"name": "no id here", "mimeType": DOC_MIME, "webViewLink": "u"},
+            {"id": "F1", "name": "good doc", "mimeType": DOC_MIME, "webViewLink": "u"},
+        ]
+    }
+    drive.files.return_value.list.return_value = page
+    service._drive = drive
+
+    files, skipped = service.list_folder_tree("ROOT", max_files=100)
+
+    assert [f["id"] for f in files] == ["F1"]
+    assert skipped == 0
