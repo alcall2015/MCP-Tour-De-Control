@@ -23,6 +23,9 @@ from app.services.google_service import (
         ("https://docs.google.com/document/d/XYZ789/edit", "XYZ789"),
         ("https://drive.google.com/file/d/FILE42/view?usp=sharing", "FILE42"),
         ("https://drive.google.com/open?id=OPEN99", "OPEN99"),
+        ("https://drive.google.com/drive/folders/1AbC_dEf-GHi", "1AbC_dEf-GHi"),
+        ("https://drive.google.com/drive/folders/1AbC_dEf-GHi?usp=drive_link", "1AbC_dEf-GHi"),
+        ("https://drive.google.com/drive/u/0/folders/1AbC_dEf-GHi", "1AbC_dEf-GHi"),
         ("https://example.com/not-google", None),
         ("", None),
     ],
@@ -103,6 +106,45 @@ def test_sheets_and_drive_clients_get_a_bounded_http_timeout():
         assert "credentials" not in kwargs  # timeout is set via the http object instead
         authed_http = kwargs["http"]
         assert authed_http.http.timeout == 30
+
+
+def test_list_folder_tree_skips_an_unlistable_subfolder_and_continues():
+    # One unlistable subfolder must not abort the whole walk: the files
+    # discovered before and after it must still come back, and a warning
+    # naming the failed folder must be logged.
+    service = GoogleService.__new__(GoogleService)
+
+    def fake_list_children(parent_id):
+        if parent_id == "ROOT":
+            return [
+                {"id": "SUB", "name": "Bad", "mimeType": "application/vnd.google-apps.folder"},
+                {"id": "F1", "name": "Doc", "mimeType": "application/vnd.google-apps.document", "webViewLink": "u"},
+            ]
+        if parent_id == "SUB":
+            raise GoogleAccessError("cannot list folder SUB: permission denied")
+        raise AssertionError(f"unexpected parent {parent_id}")
+
+    service._list_children = MagicMock(side_effect=fake_list_children)
+
+    with patch("app.services.google_service.log") as mock_log:
+        files, skipped = service.list_folder_tree("ROOT", 500)
+
+    assert [f["id"] for f in files] == ["F1"]
+    assert skipped == 0
+    assert mock_log.warning.called
+    warning_text = " ".join(str(c) for c in mock_log.warning.call_args_list)
+    assert "SUB" in warning_text
+
+
+def test_list_folder_tree_propagates_when_the_root_folder_is_unlistable():
+    # A failure listing the root itself means the configured folder id is
+    # wrong; that must still surface as an error (HTTP 400), not be silently
+    # swallowed.
+    service = GoogleService.__new__(GoogleService)
+    service._list_children = MagicMock(side_effect=GoogleAccessError("cannot list folder ROOT: not found"))
+
+    with pytest.raises(GoogleAccessError):
+        service.list_folder_tree("ROOT", 500)
 
 
 def test_build_failure_raises_google_access_error():

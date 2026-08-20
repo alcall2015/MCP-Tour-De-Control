@@ -26,6 +26,7 @@ HTTP_TIMEOUT_SECONDS = 30
 
 _FILE_ID_PATTERNS = [
     re.compile(r"/d/([a-zA-Z0-9_-]+)"),
+    re.compile(r"/folders/([a-zA-Z0-9_-]+)"),
     re.compile(r"[?&]id=([a-zA-Z0-9_-]+)"),
 ]
 
@@ -105,7 +106,17 @@ class GoogleService:
 
         while queue:
             parent, section = queue.pop(0)
-            for entry in self._list_children(parent):
+            try:
+                children = self._list_children(parent)
+            except GoogleAccessError:
+                if parent == folder_id:
+                    # The root itself is unlistable: the configured folder id
+                    # is wrong, and the caller needs that to surface as an error.
+                    raise
+                # One unlistable subfolder must not abort the whole walk.
+                log.warning("Cannot list subfolder, skipping", folder=parent)
+                continue
+            for entry in children:
                 entry_id = entry.get("id")
                 if entry_id is None:
                     # An entry we can't identify can't be tracked (deduped, queued,
