@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
-import { getHeatmap, listActivityDocuments } from "../lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getHeatmap, listActivityDocuments, scanActivity } from "../lib/api";
 import { ActivityGrid } from "../components/Activity/ActivityGrid";
 import { SectionList } from "../components/Activity/SectionList";
 import { Spinner } from "../components/ui/Spinner";
+import { MutationError } from "../components/ui/MutationError";
 
 function relativeDate(iso: string | null): string {
   if (!iso) return "never";
@@ -18,6 +19,15 @@ export function ActivityPage() {
     queryFn: listActivityDocuments,
   });
   const { data: heatmap } = useQuery({ queryKey: ["activity-heatmap"], queryFn: getHeatmap });
+
+  const queryClient = useQueryClient();
+  const scanMutation = useMutation({
+    mutationFn: scanActivity,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["activity-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["activity-heatmap"] });
+    },
+  });
 
   if (isLoading) {
     return (
@@ -37,11 +47,21 @@ export function ActivityPage() {
           >
             Activity — last 12 months
           </h3>
-          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            {heatmap?.total_changes ?? 0} lines changed · last scan{" "}
-            {relativeDate(heatmap?.last_scan_at ?? null)}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+              {heatmap?.total_changes ?? 0} lines changed · last scan{" "}
+              {relativeDate(heatmap?.last_scan_at ?? null)}
+            </span>
+            <button
+              className="btn-secondary"
+              disabled={scanMutation.isPending}
+              onClick={() => scanMutation.mutate()}
+            >
+              {scanMutation.isPending ? "Scanning..." : "Scan now"}
+            </button>
+          </div>
         </div>
+        <MutationError error={scanMutation.error} />
         {heatmap && <ActivityGrid days={heatmap.days} />}
       </div>
 

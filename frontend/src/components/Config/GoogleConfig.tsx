@@ -9,17 +9,20 @@ export function GoogleConfig() {
   const { data: config, isLoading } = useQuery({ queryKey: ["config"], queryFn: getConfig });
   const [saKey, setSaKey] = useState("");
   const [cron, setCron] = useState<string | null>(null);
+  const [folder, setFolder] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: () =>
       updateConfig({
         google_sa_key: saKey || undefined,
         activity_cron: cron ?? undefined,
+        drive_folder_id: folder ?? undefined,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["config"] });
       setSaKey("");
       setCron(null);
+      setFolder(null);
     },
   });
 
@@ -29,7 +32,7 @@ export function GoogleConfig() {
         className="mb-5 text-base font-semibold"
         style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif", color: "var(--text-primary)" }}
       >
-        Google Projects Access
+        Google Drive Access
       </h3>
 
       {isLoading ? (
@@ -50,13 +53,32 @@ export function GoogleConfig() {
               onChange={(event) => setSaKey(event.target.value)}
             />
             <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-              Share every project Sheet with this service account email, then keep the files private.
+              Grants read access to the tracked Drive folder below. Keep the shared files private
+              otherwise.
             </p>
             {config?.google_sa_email && (
               <p className="mt-1 font-mono text-xs" style={{ color: "var(--text-secondary)" }}>
                 {config.google_sa_email}
               </p>
             )}
+          </div>
+
+          <div>
+            <label
+              className="mb-1.5 block text-xs font-medium uppercase tracking-wider"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Tracked Drive folder
+            </label>
+            <input
+              className="input-field"
+              placeholder="Folder id, or paste the folder URL"
+              value={folder ?? config?.drive_folder_id ?? ""}
+              onChange={(event) => setFolder(event.target.value)}
+            />
+            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+              Share this folder with the service account above. Every Doc and Sheet inside it is tracked.
+            </p>
           </div>
 
           <div>
@@ -74,7 +96,7 @@ export function GoogleConfig() {
 
           <button
             className="btn-primary"
-            disabled={mutation.isPending || (!saKey && cron === null)}
+            disabled={mutation.isPending || (!saKey && cron === null && folder === null)}
             onClick={() => mutation.mutate()}
           >
             {mutation.isPending ? "Saving..." : "Save"}
