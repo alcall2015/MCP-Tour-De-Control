@@ -4,7 +4,7 @@ import asyncio
 from datetime import date, datetime, timezone
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Config, DocumentActivity, DocumentContent, TrackedDocument
@@ -42,7 +42,18 @@ class DocumentScanner:
         if config:
             config.last_scan_at = datetime.now(timezone.utc)
 
-        await DocumentScanner._mark_absent(session, seen)
+        if skipped:
+            # The walk's view of the folder is known to be incomplete: files
+            # beyond the cap are absent from `seen` through no fault of their
+            # own, and walk order can shift between runs, so using this run
+            # to conclude anything about absence would flap the flag.
+            log.warning(
+                "Cap hit: skipping absent-marking for this run",
+                cap=DocumentScanner.MAX_FILES,
+                skipped=skipped,
+            )
+        else:
+            await DocumentScanner._mark_absent(session, seen)
         await session.commit()
         log.info("Activity scan finished", walked=len(files), skipped=skipped)
         return len(files)
@@ -66,7 +77,12 @@ class DocumentScanner:
 
         try:
             text = await DocumentScanner._extract(google, entry)
-        except GoogleAccessError as exc:
+        except Exception as exc:
+            # Broadened beyond GoogleAccessError: any per-file failure (a
+            # malformed Drive field, an unexpected sheet shape, ...) must
+            # flag this one file rather than abort the run and, because the
+            # commit happens once at the end, discard everything already
+            # processed in this walk.
             doc.last_error = str(exc)
             log.warning("Extraction failed", document=doc.name, error=str(exc))
             return
@@ -108,11 +124,17 @@ class DocumentScanner:
         ).scalar_one_or_none()
 
         modified = entry.get("modifiedTime")
-        modified_at = (
-            datetime.fromisoformat(modified.replace("Z", "+00:00")).astimezone(timezone.utc)
-            if modified
-            else None
-        )
+        modified_at = None
+        parse_error: str | None = None
+        if modified:
+            try:
+                modified_at = datetime.fromisoformat(modified.replace("Z", "+00:00")).astimezone(timezone.utc)
+            except Exception as exc:
+                # A malformed Drive field must not raise out of the walk: this
+                # metadata field sits outside the per-file extraction try/except,
+                # and a raise here would discard the whole run at commit time.
+                parse_error = f"cannot parse modifiedTime {modified!r}: {exc}"
+                log.warning("Malformed modifiedTime, leaving it unset", document=entry.get("name"), error=parse_error)
 
         if doc is None:
             doc = TrackedDocument(file_id=entry["id"], name=entry["name"], mime_type=entry["mimeType"])
@@ -125,7 +147,7 @@ class DocumentScanner:
         doc.last_modified_at = modified_at
         doc.last_author = entry.get("author")
         doc.is_present = True
-        doc.last_error = None
+        doc.last_error = parse_error
 
         await session.flush()
         return doc
@@ -167,7 +189,28 @@ class DocumentScanner:
     @staticmethod
     async def _mark_absent(session: AsyncSession, seen: set[str]) -> None:
         """Flag documents that left the folder. Their history is deliberately kept."""
-        statement = update(TrackedDocument).where(TrackedDocument.is_present.is_(True)).values(is_present=False)
-        if seen:
-            statement = statement.where(TrackedDocument.file_id.not_in(seen))
+        if not seen:
+            tracked_count = (
+                await session.execute(select(func.count()).select_from(TrackedDocument))
+            ).scalar_one()
+            if tracked_count:
+                # A walk that found nothing while documents are already tracked is
+                # far more likely a misconfiguration (wrong/mistyped folder id, a
+                # Doc URL pasted where a folder was meant) than a genuinely emptied
+                # folder. Marking everything absent on that basis would be a false
+                # signal, so leave the flags alone instead.
+                log.warning(
+                    "Scan walked no files while documents are tracked; leaving presence flags unchanged",
+                    tracked=tracked_count,
+                )
+                return
+            # No files walked and nothing tracked yet: the normal first-run case.
+            return
+
+        statement = (
+            update(TrackedDocument)
+            .where(TrackedDocument.is_present.is_(True))
+            .where(TrackedDocument.file_id.not_in(seen))
+            .values(is_present=False)
+        )
         await session.execute(statement)

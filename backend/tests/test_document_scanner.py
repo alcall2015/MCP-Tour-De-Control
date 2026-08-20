@@ -93,17 +93,76 @@ async def test_same_day_rescan_accumulates_instead_of_replacing(session):
 
 
 async def test_vanished_document_is_marked_absent_and_keeps_history(session):
+    # A genuine removal is represented by a non-empty walk that no longer
+    # includes the file (a decoy file is present so the walk isn't empty —
+    # see test_empty_walk_with_tracked_documents_marks_nothing_absent for
+    # why an empty walk must NOT be treated as "everything removed").
     await _configured(session)
     with patch("app.services.document_scanner.GoogleService", return_value=_google([_doc()], text="a")):
         await DocumentScanner.scan_all(session)
     with patch("app.services.document_scanner.GoogleService", return_value=_google([_doc()], text="a\nb")):
         await DocumentScanner.scan_all(session)
-    with patch("app.services.document_scanner.GoogleService", return_value=_google([])):
+    with patch(
+        "app.services.document_scanner.GoogleService",
+        return_value=_google([_doc("F2", name="Autre")]),
+    ):
         await DocumentScanner.scan_all(session)
 
-    doc = (await session.execute(select(TrackedDocument))).scalar_one()
+    doc = (await session.execute(select(TrackedDocument).where(TrackedDocument.file_id == "F1"))).scalar_one()
     assert doc.is_present is False
     assert len((await session.execute(select(DocumentActivity))).scalars().all()) == 1
+
+
+async def test_empty_walk_with_tracked_documents_marks_nothing_absent(session):
+    await _configured(session)
+    with patch("app.services.document_scanner.GoogleService", return_value=_google([_doc()], text="a")):
+        await DocumentScanner.scan_all(session)
+
+    with (
+        patch("app.services.document_scanner.GoogleService", return_value=_google([])),
+        patch("app.services.document_scanner.log") as mock_log,
+    ):
+        walked = await DocumentScanner.scan_all(session)
+
+    assert walked == 0
+    doc = (await session.execute(select(TrackedDocument))).scalar_one()
+    assert doc.is_present is True, "an empty walk with tracked documents is likely a misconfiguration, not a real removal"
+    assert mock_log.warning.called
+    warning_text = " ".join(str(c) for c in mock_log.warning.call_args_list).lower()
+    assert "no files" in warning_text
+
+
+async def test_empty_walk_with_no_tracked_documents_does_not_error(session):
+    await _configured(session)
+    with patch("app.services.document_scanner.GoogleService", return_value=_google([])):
+        walked = await DocumentScanner.scan_all(session)
+
+    assert walked == 0
+    assert (await session.execute(select(TrackedDocument))).scalars().all() == []
+
+
+async def test_cap_hit_skips_absent_marking_for_the_run(session):
+    # F1's presence in the tracked table simulates a file sitting untouched in
+    # Drive but pushed out of `seen` by the 500-file cap on this run. Because
+    # skipped > 0, the walk's view of the folder is known to be incomplete and
+    # must not be used to conclude anything about absence.
+    await _configured(session)
+    with patch("app.services.document_scanner.GoogleService", return_value=_google([_doc("F1")], text="a")):
+        await DocumentScanner.scan_all(session)
+
+    with (
+        patch(
+            "app.services.document_scanner.GoogleService",
+            return_value=_google([_doc("F2", name="Autre")], skipped=5),
+        ),
+        patch("app.services.document_scanner.log") as mock_log,
+    ):
+        await DocumentScanner.scan_all(session)
+
+    doc = (await session.execute(select(TrackedDocument).where(TrackedDocument.file_id == "F1"))).scalar_one()
+    assert doc.is_present is True, "the walk was truncated by the cap; it cannot be used to conclude F1 is gone"
+    warning_text = " ".join(str(c) for c in mock_log.warning.call_args_list).lower()
+    assert "skip" in warning_text and "cap" in warning_text
 
 
 async def test_a_failing_file_does_not_abort_the_walk(session):
@@ -116,6 +175,25 @@ async def test_a_failing_file_does_not_abort_the_walk(session):
     docs = (await session.execute(select(TrackedDocument))).scalars().all()
     assert len(docs) == 2
     assert all("permission denied" in (d.last_error or "") for d in docs)
+
+
+async def test_malformed_modified_time_does_not_abort_the_walk(session):
+    # A malformed Drive field (here a bad modifiedTime) must be caught and
+    # recorded on the offending document's last_error, not raise out of the
+    # loop and discard the whole run's already-processed files.
+    await _configured(session)
+    bad = _doc("F1", name="Bad")
+    bad["modifiedTime"] = "not-a-real-timestamp"
+    good = _doc("F2", name="Good")
+
+    with patch("app.services.document_scanner.GoogleService", return_value=_google([bad, good])):
+        walked = await DocumentScanner.scan_all(session)
+
+    assert walked == 2
+    docs = {d.file_id: d for d in (await session.execute(select(TrackedDocument))).scalars().all()}
+    assert len(docs) == 2
+    assert docs["F2"].last_error is None
+    assert docs["F2"].line_count == 3, "the other file in the same walk must still be processed"
 
 
 async def test_non_diffable_file_is_listed_but_not_extracted(session):
