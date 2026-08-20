@@ -50,7 +50,8 @@ class DocumentScanner:
             raise GoogleAccessError("Google service account key not configured")
         if not config.drive_folder_id:
             raise GoogleAccessError("No Drive folder configured")
-        return GoogleService(decrypt_value(config.google_sa_key)), config.drive_folder_id
+        google = await asyncio.to_thread(GoogleService, decrypt_value(config.google_sa_key))
+        return google, config.drive_folder_id
 
     @staticmethod
     async def _process(session: AsyncSession, google: GoogleService, entry: dict, today: date) -> None:
