@@ -31,9 +31,14 @@ def test_empty_inputs():
 
 
 def test_large_repetitive_document_is_not_treated_as_junk():
-    """SequenceMatcher's autojunk heuristic must be off, or popular lines are ignored."""
-    old = ["" for _ in range(300)] + ["real content"]
-    new = ["" for _ in range(300)] + ["different content"]
+    """SequenceMatcher's autojunk heuristic must be off, or popular lines are ignored.
+
+    The differing line must lead (not trail) the repetitive run, so the matcher must
+    find a seed inside the blank line sequence. Without autojunk=False, the popularity
+    heuristic drops blank lines and the test would wrongly pass even if the flag were removed.
+    """
+    old = ["real content"] + ["" for _ in range(300)]
+    new = ["different content"] + ["" for _ in range(300)]
     assert count_changes(old, new) == (1, 1)
 
 
@@ -47,6 +52,11 @@ def test_split_lines_drops_trailing_blank_lines():
 
 def test_split_lines_keeps_interior_blank_lines():
     assert split_lines("a\n\nb") == ["a", "", "b"]
+
+
+def test_split_lines_keeps_interior_whitespace_only_lines():
+    """Interior lines with only whitespace become empty strings and are preserved."""
+    assert split_lines("a\n   \nb") == ["a", "", "b"]
 
 
 def test_split_lines_on_empty_text():
