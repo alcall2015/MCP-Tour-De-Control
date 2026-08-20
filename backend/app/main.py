@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.database import async_session
 from app.models import McpServer, Prompt
+from app.routers import activity as activity_router
 from app.routers import chat as chat_router
 from app.routers import config as config_router
 from app.routers import executions as executions_router
@@ -103,6 +104,7 @@ app.include_router(prompts_router.router)
 app.include_router(scripts_router.router)
 app.include_router(stress_tests_router.router)
 app.include_router(chat_router.router)
+app.include_router(activity_router.router)
 
 
 @app.get("/health")

@@ -38,6 +38,10 @@ class DocumentScanner:
             seen.add(entry["id"])
             await DocumentScanner._process(session, google, entry, today)
 
+        config = (await session.execute(select(Config).limit(1))).scalar_one_or_none()
+        if config:
+            config.last_scan_at = datetime.now(timezone.utc)
+
         await DocumentScanner._mark_absent(session, seen)
         await session.commit()
         log.info("Activity scan finished", walked=len(files), skipped=skipped)
