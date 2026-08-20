@@ -62,6 +62,12 @@ export function ActivityPage() {
           </div>
         </div>
         <MutationError error={scanMutation.error} />
+        {scanMutation.isSuccess && (
+          <p className="mb-3 text-xs" style={{ color: "var(--text-muted)" }}>
+            Last scan walked {scanMutation.data.walked}{" "}
+            {scanMutation.data.walked === 1 ? "file" : "files"}.
+          </p>
+        )}
         {heatmap && <ActivityGrid days={heatmap.days} />}
       </div>
 
