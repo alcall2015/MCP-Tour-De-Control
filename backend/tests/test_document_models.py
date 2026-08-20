@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from app.models import DocumentActivity, DocumentContent, TrackedDocument
@@ -84,3 +84,29 @@ async def test_absent_document_keeps_its_history(session):
     rows = (await session.execute(select(DocumentActivity))).scalars().all()
     assert len(rows) == 1
     assert rows[0].added == 3
+
+
+async def test_content_document_id_is_unique(session):
+    doc = await _document(session)
+    session.add(DocumentContent(document_id=doc.id, text="first"))
+    await session.commit()
+
+    session.add(DocumentContent(document_id=doc.id, text="second"))
+    with pytest.raises(IntegrityError):
+        await session.commit()
+
+
+async def test_content_and_activity_cascade_via_database(session):
+    """Cascade via database-level ON DELETE CASCADE, not ORM delete-orphan."""
+    doc = await _document(session)
+    session.add(DocumentContent(document_id=doc.id, text="a\nb\nc"))
+    session.add(
+        DocumentActivity(document_id=doc.id, day=date(2026, 8, 20), added=142, removed=5)
+    )
+    await session.commit()
+
+    await session.execute(delete(TrackedDocument).where(TrackedDocument.id == doc.id))
+    await session.commit()
+
+    assert (await session.execute(select(DocumentContent))).scalars().all() == []
+    assert (await session.execute(select(DocumentActivity))).scalars().all() == []
