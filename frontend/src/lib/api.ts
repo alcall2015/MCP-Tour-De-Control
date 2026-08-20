@@ -326,3 +326,43 @@ export function parseSSEStream(
     return reader.read().then(process);
   });
 }
+
+// Activity
+export interface ActivityDocument {
+  id: string;
+  name: string;
+  mime_type: string;
+  web_url: string;
+  section: string | null;
+  last_modified_at: string | null;
+  last_author: string | null;
+  line_count: number | null;
+  is_present: boolean;
+  last_error: string | null;
+  last_activity_day: string | null;
+  last_added: number;
+  last_removed: number;
+}
+
+export interface ActivitySection {
+  name: string;
+  documents: ActivityDocument[];
+}
+
+export interface HeatmapDay {
+  day: string;
+  added: number;
+  removed: number;
+  total: number;
+}
+
+export interface Heatmap {
+  days: HeatmapDay[];
+  total_changes: number;
+  last_scan_at: string | null;
+}
+
+export const listActivityDocuments = () => request<ActivitySection[]>("/activity/documents");
+export const getHeatmap = () => request<Heatmap>("/activity/heatmap");
+export const scanActivity = () =>
+  request<{ walked: number }>("/activity/scan", { method: "POST" });
