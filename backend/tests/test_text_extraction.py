@@ -482,3 +482,110 @@ def test_list_folder_tree_ordinary_doc_and_sheet_are_unaffected_by_shortcut_hand
     assert by_id["S1"]["mimeType"] == SHEET_MIME
     assert by_id["S1"]["name"] == "Une feuille"
     drive.files.return_value.get.assert_not_called()
+
+
+def test_list_folder_tree_terminates_on_a_mutual_folder_shortcut_cycle():
+    # Real Drive containment is acyclic, but a shortcut can target any
+    # folder. Folder A holds a shortcut to B and B holds a shortcut back to
+    # A: without a visited-folder guard, the BFS enqueues A and B forever.
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+
+    call_count = 0
+    # A correct walk lists each of the two folders exactly once, so 2 calls
+    # to files().list() total. The ceiling is set well above that so a
+    # regression that drops the visited-folder guard trips this assertion
+    # (and fails in milliseconds with a clear message) instead of spinning
+    # the BFS forever and hanging the whole test suite.
+    CALL_CEILING = 10
+
+    def children(q, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count > CALL_CEILING:
+            raise AssertionError("walk did not terminate")
+        page = MagicMock()
+        if "'A' in parents" in q:
+            page.execute.return_value = {
+                "files": [
+                    {
+                        "id": "SC_A_TO_B",
+                        "name": "Lien vers B",
+                        "mimeType": SHORTCUT_MIME,
+                        "shortcutDetails": {"targetId": "B", "targetMimeType": FOLDER_MIME},
+                    },
+                    {"id": "DOC_A", "name": "Doc A", "mimeType": DOC_MIME, "webViewLink": "u"},
+                ]
+            }
+        elif "'B' in parents" in q:
+            page.execute.return_value = {
+                "files": [
+                    {
+                        "id": "SC_B_TO_A",
+                        "name": "Lien vers A",
+                        "mimeType": SHORTCUT_MIME,
+                        "shortcutDetails": {"targetId": "A", "targetMimeType": FOLDER_MIME},
+                    },
+                    {"id": "DOC_B", "name": "Doc B", "mimeType": DOC_MIME, "webViewLink": "u"},
+                ]
+            }
+        else:
+            raise AssertionError(f"unexpected query {q}")
+        return page
+
+    drive.files.return_value.list.side_effect = children
+    service._drive = drive
+
+    files, skipped = service.list_folder_tree("A", max_files=100)
+
+    assert skipped == 0
+    ids = [f["id"] for f in files]
+    assert sorted(ids) == ["DOC_A", "DOC_B"]
+    assert ids.count("DOC_A") == 1
+    assert ids.count("DOC_B") == 1
+
+
+def test_list_folder_tree_lists_a_folder_once_when_two_shortcuts_target_it():
+    # Two different shortcuts pointing at the same folder must not double
+    # the walk: that folder's contents should be listed once, not twice.
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+    target_list_calls = 0
+
+    def children(q, **kwargs):
+        nonlocal target_list_calls
+        page = MagicMock()
+        if "'ROOT' in parents" in q:
+            page.execute.return_value = {
+                "files": [
+                    {
+                        "id": "SC1",
+                        "name": "Lien 1",
+                        "mimeType": SHORTCUT_MIME,
+                        "shortcutDetails": {"targetId": "TARGET", "targetMimeType": FOLDER_MIME},
+                    },
+                    {
+                        "id": "SC2",
+                        "name": "Lien 2",
+                        "mimeType": SHORTCUT_MIME,
+                        "shortcutDetails": {"targetId": "TARGET", "targetMimeType": FOLDER_MIME},
+                    },
+                ]
+            }
+        elif "'TARGET' in parents" in q:
+            target_list_calls += 1
+            page.execute.return_value = {
+                "files": [{"id": "F1", "name": "Doc cible", "mimeType": DOC_MIME, "webViewLink": "u"}]
+            }
+        else:
+            raise AssertionError(f"unexpected query {q}")
+        return page
+
+    drive.files.return_value.list.side_effect = children
+    service._drive = drive
+
+    files, skipped = service.list_folder_tree("ROOT", max_files=100)
+
+    assert skipped == 0
+    assert [f["id"] for f in files] == ["F1"]
+    assert target_list_calls == 1

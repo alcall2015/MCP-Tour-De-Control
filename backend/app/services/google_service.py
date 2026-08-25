@@ -111,8 +111,15 @@ class GoogleService:
         this can make the same target reachable more than once in a walk (two
         shortcuts to it, or the file itself plus a shortcut), entries are
         deduplicated on the resolved id: the first occurrence wins.
+
+        Real Drive containment is acyclic, but a shortcut can target any
+        folder, including an ancestor or itself. A folder id is therefore only
+        ever enqueued once (`visited_folders`, seeded with the root): this
+        both bounds the walk when shortcuts form a cycle and avoids listing a
+        folder twice when two shortcuts point at it.
         """
         queue: list[tuple[str, str | None]] = [(folder_id, None)]
+        visited_folders: set[str] = {folder_id}
         files: list[dict] = []
         skipped = 0
         seen_ids: dict[str, str] = {}
@@ -141,7 +148,9 @@ class GoogleService:
 
                 if mime_type == FOLDER_MIME:
                     # The first subfolder level names the section; deeper folders inherit it.
-                    queue.append((entry_id, section or entry.get("name")))
+                    if entry_id not in visited_folders:
+                        visited_folders.add(entry_id)
+                        queue.append((entry_id, section or entry.get("name")))
                     continue
 
                 if mime_type == SHORTCUT_MIME:
@@ -154,17 +163,16 @@ class GoogleService:
                     if target_mime == FOLDER_MIME:
                         # A shortcut to a folder behaves like the folder itself,
                         # but the shortcut's own name still names the section.
-                        queue.append((target_id, section or entry.get("name")))
+                        # Same visited-folder guard as a real subfolder: a
+                        # shortcut may target an ancestor (or itself), and two
+                        # shortcuts may target the same folder.
+                        if target_id not in visited_folders:
+                            visited_folders.add(target_id)
+                            queue.append((target_id, section or entry.get("name")))
                         continue
 
                     resolved_id = target_id
-                    if resolved_id in seen_ids:
-                        log.warning(
-                            "Duplicate document in walk, skipping",
-                            duplicate=entry.get("name"),
-                            kept=seen_ids[resolved_id],
-                            id=resolved_id,
-                        )
+                    if self._is_duplicate(resolved_id, entry.get("name"), seen_ids):
                         continue
 
                     try:
@@ -189,13 +197,7 @@ class GoogleService:
                     }
                 else:
                     resolved_id = entry_id
-                    if resolved_id in seen_ids:
-                        log.warning(
-                            "Duplicate document in walk, skipping",
-                            duplicate=entry.get("name"),
-                            kept=seen_ids[resolved_id],
-                            id=resolved_id,
-                        )
+                    if self._is_duplicate(resolved_id, entry.get("name"), seen_ids):
                         continue
 
                     file_entry = {
@@ -215,6 +217,24 @@ class GoogleService:
                     skipped += 1
 
         return files, skipped
+
+    @staticmethod
+    def _is_duplicate(resolved_id: str, name: str | None, seen_ids: dict[str, str]) -> bool:
+        """True (after logging a warning) when resolved_id was already emitted in this walk.
+
+        Shared by the shortcut-to-file and plain-file branches of
+        list_folder_tree so the dedup check and its warning cannot drift
+        apart between the two paths.
+        """
+        if resolved_id not in seen_ids:
+            return False
+        log.warning(
+            "Duplicate document in walk, skipping",
+            duplicate=name,
+            kept=seen_ids[resolved_id],
+            id=resolved_id,
+        )
+        return True
 
     def _get_target_metadata(self, file_id: str) -> dict:
         """Fetch the metadata of a shortcut's target file."""
