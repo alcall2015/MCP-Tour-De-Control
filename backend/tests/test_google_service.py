@@ -147,6 +147,134 @@ def test_list_folder_tree_propagates_when_the_root_folder_is_unlistable():
         service.list_folder_tree("ROOT", 500)
 
 
+def test_init_creates_httplib2_transports_with_the_short_and_export_timeouts():
+    # __init__ must build two distinct httplib2 transports: the existing
+    # short one (listing/metadata) and a new long one (content exports).
+    valid_key = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "p",
+            "private_key_id": "k",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
+            "client_email": "svc@p.iam.gserviceaccount.com",
+            "client_id": "1",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    )
+
+    with (
+        patch("app.services.google_service.Credentials.from_service_account_info"),
+        patch("app.services.google_service.httplib2.Http") as mock_http_cls,
+        patch("app.services.google_service.AuthorizedHttp") as mock_authed_http_cls,
+        patch("app.services.google_service.build", return_value=MagicMock()),
+    ):
+        mock_authed_http_cls.side_effect = lambda credentials, http: MagicMock(http=http)
+        GoogleService(valid_key)
+
+    timeouts = sorted(call.kwargs["timeout"] for call in mock_http_cls.call_args_list)
+    assert timeouts == [30, 120]
+
+
+def test_init_stores_a_distinct_export_http_not_passed_to_build():
+    # build() (used for both the sheets and drive clients) must keep
+    # receiving only the short-timeout transport. The long-timeout transport
+    # must be stored separately on the instance, for content-reading calls
+    # to opt into explicitly.
+    valid_key = json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "p",
+            "private_key_id": "k",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
+            "client_email": "svc@p.iam.gserviceaccount.com",
+            "client_id": "1",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    )
+    captured_builds = {}
+
+    def fake_build(service_name, version, **kwargs):
+        captured_builds[service_name] = kwargs["http"]
+        return MagicMock()
+
+    with (
+        patch("app.services.google_service.Credentials.from_service_account_info"),
+        patch("app.services.google_service.build", side_effect=fake_build),
+    ):
+        service = GoogleService(valid_key)
+
+    assert captured_builds["sheets"].http.timeout == 30
+    assert captured_builds["drive"].http.timeout == 30
+    assert service._export_http is not None
+    assert service._export_http.http.timeout == 120
+    assert service._export_http is not captured_builds["drive"]
+    assert service._export_http is not captured_builds["sheets"]
+
+
+def test_export_text_passes_the_export_http_transport_to_execute():
+    service = GoogleService.__new__(GoogleService)
+    export_http = object()  # a sentinel distinguishable from the short-timeout transport
+    service._export_http = export_http
+    drive = MagicMock()
+    drive.files.return_value.export.return_value.execute.return_value = b"content"
+    service._drive = drive
+
+    service.export_text("DOC1")
+
+    drive.files.return_value.export.return_value.execute.assert_called_once_with(http=export_http)
+
+
+def test_export_text_falls_back_to_default_transport_when_export_http_unset():
+    # A service built via __new__ (as the existing tests do) never runs
+    # __init__, so it has no instance _export_http. The class attribute
+    # default (None) must keep this working: HttpRequest.execute(http=None)
+    # falls back to the request's own transport, matching current behaviour.
+    service = GoogleService.__new__(GoogleService)
+    drive = MagicMock()
+    drive.files.return_value.export.return_value.execute.return_value = b"content"
+    service._drive = drive
+
+    result = service.export_text("DOC1")
+
+    assert result == "content"
+    drive.files.return_value.export.return_value.execute.assert_called_once_with(http=None)
+
+
+def test_read_all_tabs_passes_the_export_http_only_on_batch_get():
+    service = GoogleService.__new__(GoogleService)
+    export_http = object()
+    service._export_http = export_http
+    sheets = MagicMock()
+    sheets.spreadsheets.return_value.get.return_value.execute.return_value = {
+        "sheets": [{"properties": {"title": "Notes"}}]
+    }
+    sheets.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.return_value = {
+        "valueRanges": [{"values": [["a"]]}]
+    }
+    service._sheets = sheets
+
+    service.read_all_tabs("SHEET1")
+
+    # the small metadata call must stay on the default (short-timeout) transport
+    sheets.spreadsheets.return_value.get.return_value.execute.assert_called_once_with()
+    # the potentially large batchGet call must use the long-timeout transport
+    sheets.spreadsheets.return_value.values.return_value.batchGet.return_value.execute.assert_called_once_with(
+        http=export_http
+    )
+
+
+def test_list_children_does_not_use_the_export_http_transport():
+    service = GoogleService.__new__(GoogleService)
+    service._export_http = object()  # must not leak into a small listing call
+    drive = MagicMock()
+    drive.files.return_value.list.return_value.execute.return_value = {"files": []}
+    service._drive = drive
+
+    service._list_children("FOLDER1")
+
+    drive.files.return_value.list.return_value.execute.assert_called_once_with()
+
+
 def test_build_failure_raises_google_access_error():
     valid_key = json.dumps(
         {

@@ -22,7 +22,8 @@ SCOPES = [
 # googleapiclient sets no socket timeout by default. refresh_all is sequential
 # and the scheduler runs with max_instances=1, so one wedged connection would
 # otherwise stop the daily refresh permanently until the backend is restarted.
-HTTP_TIMEOUT_SECONDS = 30
+HTTP_TIMEOUT_SECONDS = 30       # listing and metadata: must stay responsive
+EXPORT_TIMEOUT_SECONDS = 120    # content reads: a long Doc genuinely takes time
 
 _FILE_ID_PATTERNS = [
     re.compile(r"/d/([a-zA-Z0-9_-]+)"),
@@ -62,6 +63,11 @@ def detect_kind(url: str) -> str:
 class GoogleService:
     """Thin wrapper over the Sheets and Drive APIs. One instance per refresh run."""
 
+    # Default for instances built via GoogleService.__new__ (as tests do),
+    # which never run __init__. HttpRequest.execute(http=None) falls back to
+    # the request's own transport, so this matches current behaviour exactly.
+    _export_http = None
+
     def __init__(self, sa_key_json: str):
         try:
             info = json.loads(sa_key_json)
@@ -72,12 +78,22 @@ class GoogleService:
         try:
             # A bounded httplib2 timeout, passed via the http= kwarg (instead
             # of credentials=) so a hung connection raises rather than blocking
-            # the refresh run forever.
+            # the refresh run forever. Both clients are built on this short
+            # transport, so every call defaults to a fast failure.
             authed_http = AuthorizedHttp(
                 credentials, http=httplib2.Http(timeout=HTTP_TIMEOUT_SECONDS)
             )
             self._sheets = build("sheets", "v4", http=authed_http, cache_discovery=False)
             self._drive = build("drive", "v3", http=authed_http, cache_discovery=False)
+
+            # A second transport, sharing the same credentials, for calls
+            # that stream document content: a long Doc export or a
+            # many-row spreadsheet read genuinely needs more than
+            # HTTP_TIMEOUT_SECONDS. Call sites opt in explicitly via
+            # execute(http=self._export_http).
+            self._export_http = AuthorizedHttp(
+                credentials, http=httplib2.Http(timeout=EXPORT_TIMEOUT_SECONDS)
+            )
         except Exception as exc:
             raise GoogleAccessError(f"cannot build Google API client: {exc}") from exc
 
@@ -269,7 +285,11 @@ class GoogleService:
     def export_text(self, file_id: str) -> str:
         """Export a Google Doc as plain text."""
         try:
-            data = self._drive.files().export(fileId=file_id, mimeType="text/plain").execute()
+            data = (
+                self._drive.files()
+                .export(fileId=file_id, mimeType="text/plain")
+                .execute(http=self._export_http)
+            )
             return data.decode("utf-8") if isinstance(data, bytes) else str(data)
         except Exception as exc:
             raise GoogleAccessError(f"cannot export {file_id} as text: {exc}") from exc
@@ -293,7 +313,7 @@ class GoogleService:
                 self._sheets.spreadsheets()
                 .values()
                 .batchGet(spreadsheetId=file_id, ranges=titles)
-                .execute()
+                .execute(http=self._export_http)
             )
         except Exception as exc:
             raise GoogleAccessError(f"cannot read tabs of {file_id}: {exc}") from exc
