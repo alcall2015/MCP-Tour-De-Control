@@ -10,7 +10,7 @@ from google.oauth2.service_account import Credentials
 from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 
-from app.services.text_extractor import FOLDER_MIME
+from app.services.text_extractor import FOLDER_MIME, SHORTCUT_MIME
 
 log = structlog.get_logger()
 
@@ -92,17 +92,30 @@ class GoogleService:
             return None
         return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
 
-    _LIST_FIELDS = "nextPageToken, files(id, name, mimeType, webViewLink, modifiedTime, lastModifyingUser/displayName)"
+    _LIST_FIELDS = (
+        "nextPageToken, files(id, name, mimeType, webViewLink, modifiedTime, "
+        "lastModifyingUser/displayName, shortcutDetails)"
+    )
+    _TARGET_FIELDS = "id, name, mimeType, webViewLink, modifiedTime, lastModifyingUser/displayName"
 
     def list_folder_tree(self, folder_id: str, max_files: int) -> tuple[list[dict], int]:
         """Walk a folder breadth-first. Returns (files, number skipped by the cap).
 
         `section` is the name of the root's immediate subfolder a file descends
         from, or None for files sitting directly in the root.
+
+        Shortcuts are resolved transparently: a shortcut to a folder is walked
+        like the folder itself (using the shortcut's own name for sectioning),
+        and a shortcut to a file is emitted using the target's id/mimeType/
+        webViewLink/modifiedTime/author but the shortcut's own name. Because
+        this can make the same target reachable more than once in a walk (two
+        shortcuts to it, or the file itself plus a shortcut), entries are
+        deduplicated on the resolved id: the first occurrence wins.
         """
         queue: list[tuple[str, str | None]] = [(folder_id, None)]
         files: list[dict] = []
         skipped = 0
+        seen_ids: dict[str, str] = {}
 
         while queue:
             parent, section = queue.pop(0)
@@ -123,25 +136,92 @@ class GoogleService:
                     # or returned) at all, so drop it rather than crash the walk.
                     log.warning("Drive entry missing id, skipping", parent=parent)
                     continue
-                if entry.get("mimeType") == FOLDER_MIME:
+
+                mime_type = entry.get("mimeType")
+
+                if mime_type == FOLDER_MIME:
                     # The first subfolder level names the section; deeper folders inherit it.
                     queue.append((entry_id, section or entry.get("name")))
-                elif len(files) < max_files:
-                    files.append(
-                        {
-                            "id": entry_id,
-                            "name": entry.get("name", ""),
-                            "mimeType": entry.get("mimeType", ""),
-                            "webViewLink": entry.get("webViewLink", ""),
-                            "modifiedTime": entry.get("modifiedTime"),
-                            "author": (entry.get("lastModifyingUser") or {}).get("displayName"),
-                            "section": section,
-                        }
-                    )
+                    continue
+
+                if mime_type == SHORTCUT_MIME:
+                    details = entry.get("shortcutDetails") or {}
+                    target_id = details.get("targetId")
+                    target_mime = details.get("targetMimeType")
+                    if not target_id:
+                        log.warning("Shortcut has no target, skipping", shortcut=entry.get("name"))
+                        continue
+                    if target_mime == FOLDER_MIME:
+                        # A shortcut to a folder behaves like the folder itself,
+                        # but the shortcut's own name still names the section.
+                        queue.append((target_id, section or entry.get("name")))
+                        continue
+
+                    resolved_id = target_id
+                    if resolved_id in seen_ids:
+                        log.warning(
+                            "Duplicate document in walk, skipping",
+                            duplicate=entry.get("name"),
+                            kept=seen_ids[resolved_id],
+                            id=resolved_id,
+                        )
+                        continue
+
+                    try:
+                        target = self._get_target_metadata(target_id)
+                    except GoogleAccessError as exc:
+                        log.warning(
+                            "Cannot resolve shortcut target, skipping",
+                            shortcut=entry.get("name"),
+                            target=target_id,
+                            error=str(exc),
+                        )
+                        continue
+
+                    file_entry = {
+                        "id": target.get("id", target_id),
+                        "name": entry.get("name", ""),
+                        "mimeType": target.get("mimeType", ""),
+                        "webViewLink": target.get("webViewLink", ""),
+                        "modifiedTime": target.get("modifiedTime"),
+                        "author": (target.get("lastModifyingUser") or {}).get("displayName"),
+                        "section": section,
+                    }
+                else:
+                    resolved_id = entry_id
+                    if resolved_id in seen_ids:
+                        log.warning(
+                            "Duplicate document in walk, skipping",
+                            duplicate=entry.get("name"),
+                            kept=seen_ids[resolved_id],
+                            id=resolved_id,
+                        )
+                        continue
+
+                    file_entry = {
+                        "id": entry_id,
+                        "name": entry.get("name", ""),
+                        "mimeType": mime_type or "",
+                        "webViewLink": entry.get("webViewLink", ""),
+                        "modifiedTime": entry.get("modifiedTime"),
+                        "author": (entry.get("lastModifyingUser") or {}).get("displayName"),
+                        "section": section,
+                    }
+
+                seen_ids[resolved_id] = file_entry["name"]
+                if len(files) < max_files:
+                    files.append(file_entry)
                 else:
                     skipped += 1
 
         return files, skipped
+
+    def _get_target_metadata(self, file_id: str) -> dict:
+        """Fetch the metadata of a shortcut's target file."""
+        try:
+            return self._drive.files().get(fileId=file_id, fields=self._TARGET_FIELDS).execute()
+        except Exception as exc:
+            raise GoogleAccessError(f"cannot read metadata of {file_id}: {exc}") from exc
 
     def _list_children(self, parent_id: str) -> list[dict]:
         """Every non-trashed child of a folder, following pagination."""

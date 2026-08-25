@@ -3,6 +3,7 @@
 FOLDER_MIME = "application/vnd.google-apps.folder"
 DOC_MIME = "application/vnd.google-apps.document"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
+SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
 
 
 def is_diffable(mime_type: str) -> bool:
