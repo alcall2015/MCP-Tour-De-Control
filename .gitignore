@@ -9,3 +9,4 @@ venv/
 *.egg-info/
 .pytest_cache/
 certs/
+Note_Personnelle
