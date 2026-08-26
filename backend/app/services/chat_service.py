@@ -26,6 +26,7 @@ Reponds en francais. Sois concis et professionnel."""
 
 MAX_HISTORY = 20
 MAX_TOOL_RESULT_LEN = 2000
+MAX_TOOL_ROUNDS = 8
 
 # Fields not supported by all LLM providers in function calling schemas
 _UNSUPPORTED_SCHEMA_FIELDS = {"default", "additionalProperties", "anyOf", "title"}
@@ -146,13 +147,12 @@ class ChatService:
         for entry in context:
             messages.append({"role": entry["role"], "content": entry["content"]})
 
-        # Stream from LLM with tool call loop (max 3 rounds to prevent infinite loops)
+        # Stream from LLM with tool call loop (bounded to prevent infinite loops)
         full_response = ""
         all_tool_calls = []
-        max_tool_rounds = 3
 
         try:
-            for _round in range(max_tool_rounds + 1):
+            for _round in range(MAX_TOOL_ROUNDS):
                 text_chunk, tool_calls_batch = await _stream_llm(
                     provider, model, api_key, messages, tools, stream_callback=lambda chunk: None
                 )
@@ -191,6 +191,24 @@ class ChatService:
                         {"id": f"call_{tool_name}", "type": "function", "function": {"name": tool_name, "arguments": json.dumps(tool_args)}}
                     ]})
                     messages.append({"role": "tool", "tool_call_id": f"call_{tool_name}", "content": result_text})
+            else:
+                # Loop exhausted MAX_TOOL_ROUNDS without ever breaking, i.e. the model
+                # still wanted to call tools on the very last round. Force one more,
+                # tool-less turn so it must write an answer instead of going silent.
+                text_chunk, _ = await _stream_llm(
+                    provider, model, api_key, messages, None, stream_callback=lambda chunk: None
+                )
+                if text_chunk:
+                    full_response += text_chunk
+                    yield _sse("text", {"content": text_chunk})
+
+            if not full_response:
+                fallback_text = (
+                    "Desole, j'ai atteint la limite d'appels d'outils sans parvenir a une reponse. "
+                    "Peux-tu reformuler ou preciser ta question ?"
+                )
+                full_response = fallback_text
+                yield _sse("text", {"content": fallback_text})
 
         except Exception as e:
             log.error("Chat stream error", error=str(e))
