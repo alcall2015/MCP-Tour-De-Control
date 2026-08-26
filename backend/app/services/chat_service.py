@@ -195,9 +195,11 @@ class ChatService:
                 # Loop exhausted MAX_TOOL_ROUNDS without ever breaking, i.e. the model
                 # still wanted to call tools on the very last round. Force one more,
                 # tool-less turn so it must write an answer instead of going silent.
-                text_chunk, _ = await _stream_llm(
+                text_chunk, dropped_tool_calls = await _stream_llm(
                     provider, model, api_key, messages, None, stream_callback=lambda chunk: None
                 )
+                if dropped_tool_calls:
+                    log.warning("Synthesis turn discarded tool calls", count=len(dropped_tool_calls))
                 if text_chunk:
                     full_response += text_chunk
                     yield _sse("text", {"content": text_chunk})

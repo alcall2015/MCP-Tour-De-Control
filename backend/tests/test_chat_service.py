@@ -125,6 +125,10 @@ async def test_synthesis_turn_returning_nothing_emits_french_fallback(session):
 async def test_all_max_tool_rounds_are_actually_attempted(session):
     conv = await _make_conversation_and_config(session)
 
+    # Verify the budget constant has not drifted. This literal is deliberate: the
+    # tool-round budget is a product decision and any silent change should break a test.
+    assert MAX_TOOL_ROUNDS == 8
+
     tool_round = ("", [{"name": "list_sims", "args": {}}])
     synthesis_round = ("Reponse finale.", None)
     mock_stream_llm = AsyncMock(side_effect=[tool_round] * MAX_TOOL_ROUNDS + [synthesis_round])
@@ -134,4 +138,5 @@ async def test_all_max_tool_rounds_are_actually_attempted(session):
 
     # Asserting the exact count guards against silently shrinking the budget:
     # MAX_TOOL_ROUNDS tool-requesting rounds, then one synthesis round.
-    assert mock_stream_llm.call_count == MAX_TOOL_ROUNDS + 1
+    # Using literal 9 here ensures the test fails if MAX_TOOL_ROUNDS is changed.
+    assert mock_stream_llm.call_count == 9
