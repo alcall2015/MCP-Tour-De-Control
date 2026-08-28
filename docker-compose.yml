@@ -27,6 +27,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://mcp:mcp_secret@postgres:5432/mcp_control
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-B2d8zbySL4aG5LeprF4bM9x1qn0FB7t7V66_AHKXHGQ=}
+      # Long-running workflows (for example timed SMS conversations) need more
+      # than the application default of five minutes. Override per deployment.
+      DEFAULT_SCRIPT_TIMEOUT: ${DEFAULT_SCRIPT_TIMEOUT:-2100}
       SIPP_MCP_URL: http://host.docker.internal:9090/mcp
     extra_hosts:
       - "host.docker.internal:host-gateway"
