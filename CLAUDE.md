@@ -30,7 +30,7 @@ Backend tests need a live Postgres at `localhost:5432` (`mcp`/`mcp_secret`) with
 
 `alembic revision --autogenerate` in this repo always proposes dropping `apscheduler_jobs` and `ix_chat_message_conversation_id`. Both are wrong — strip them from the generated migration before applying it. `apscheduler_jobs` is APScheduler's own runtime jobstore table, invisible to the app's declared models; dropping it wipes every persisted cron job. See AGENTS.md for the full explanation.
 
-Backend env (`backend/.env` or process env): `DATABASE_URL`, `ENCRYPTION_KEY` (Fernet, generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`), `DEFAULT_SCRIPT_TIMEOUT`, `SIPP_MCP_URL`.
+Backend env (`backend/.env` or process env): `DATABASE_URL`, `ENCRYPTION_KEY` (Fernet, generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`), `DEFAULT_SCRIPT_TIMEOUT`, `SIPP_MCP_URL`. `docker-compose.yml` raises `DEFAULT_SCRIPT_TIMEOUT` to 2100s (the app default is 300) because timed SMS workflows outlive five minutes.
 
 ## Architecture
 
@@ -50,6 +50,8 @@ This is arbitrary code execution by design — there is no sandbox, and the subp
 
 `main.py` lifespan also auto-registers (or URL-updates) an MCP server row named `sipp-stress` pointing at `SIPP_MCP_URL` — don't create it by hand.
 
+Two extra jobs are not cron-driven and not user-configurable: `sim_pairing_sync` and `sim_pair_conversation` are added unconditionally by `main.py`'s lifespan (`set_pairing_job()` / `set_pair_conversation_job()`) on a fixed 15-minute `IntervalTrigger`. Both are near-no-ops when SIM Pairing is unconfigured: the conversation job returns early unless `config.pairing_conversation_enabled` is set, and the sync job short-circuits with an empty summary when no group or topic is tracked (it still writes a `SimPairingRun` row every time). Note `_execute_sim_pairing_sync` has no `try/except`, unlike every other job wrapper — a TmLite outage surfaces as an APScheduler job error, not a logged warning.
+
 ### Chat
 
 `POST /chat/conversations/{id}/messages` returns a `StreamingResponse` of SSE frames built by `_sse()` in `chat_service.py`; event names are `text`, `tool_call`, `tool_result`, `error`, `done`. Tool definitions come from every enabled MCP server, flattened into one namespace (`tool_name → server` map), with `_clean_schema()` stripping `default`/`additionalProperties`/`anyOf`/`title` because Gemini rejects them. History is capped at `MAX_HISTORY` messages and tool results at `MAX_TOOL_RESULT_LEN`. The system prompt is French and the assistant answers in French — preserve that.
@@ -57,6 +59,22 @@ This is arbitrary code execution by design — there is no sandbox, and the subp
 ### Activity
 
 A director dashboard, populated by a daily cron rather than user action. `DocumentScanner.scan_all()` (`document_scanner.py`, writes only) walks one shared Drive folder via a Google service account, exports each Doc/Sheet to plain text, and diffs it line-by-line against the text stored from the previous run (`utils/line_diff.py`). Added/removed line counts accumulate into a per-document, per-day `DocumentActivity` row — a same-day rescan adds to today's row rather than replacing it, so a morning scan's work survives an afternoon one. Only the latest extracted text is kept (`DocumentContent`, one row per document): full history of *counts* is preserved but full history of *content* is not, which is what keeps storage bounded. A document's first sighting is stored as a baseline with no diff, so a pre-existing file never appears as a false spike of "added" lines. `ActivityView` (`activity_view.py`, reads only) is the read model: `sections()` groups tracked documents for the document list, and `heatmap()` builds the GitHub-style contribution grid, aligning its first day on the Monday 52 weeks back so the grid never renders a partial leading column. Google access errors (`GoogleAccessError`, e.g. no service account key or no folder configured) are caught at the router and translated to `400`, not left to escape as `500`. Google scopes are `spreadsheets.readonly` and `drive.readonly` — the latter is what makes exporting Doc/Sheet content possible, not just listing filenames.
+
+### SIM Pairing
+
+Drives fictional SMS conversations between pairs of SIMs managed by an external MCP server. It hard-depends on an **enabled MCP server row literally named `TmLite`** with `transport == "http"` — both services raise if it is missing, and neither auto-registers it (unlike `sipp-stress`).
+
+Two services split along a strict boundary. `SimPairingService.sync()` (`sim_pairing_service.py`) **never sends anything**: it lists TmLite gateways and SIMs (paged 100 at a time), keeps SIMs whose `sim_group_name` matches a tracked `SimPairingGroup` and that are neither `OFFLINE` nor `DISABLED`, then pairs them deterministically — same country only, at most 3 pairs per SIM, topics assigned round-robin from `SimPairingTopic`. Pairs whose SIMs stopped being eligible are archived, never deleted. `_ensure_sim_names()` assigns each SIM one persistent local display name from `WEST_AFRICAN_NAMES`; these are labels for this app only and must never be pushed back into TmLite. Each run is recorded as a `SimPairingRun` with a summary dict.
+
+`SimPairConversationService.run_due()` (`sim_pair_conversation_service.py`) is the only sender, and it deliberately does **not** re-sync — the `sim_pairing_sync` job covers eligibility, and syncing here would enumerate the whole TmLite fleet a second time per run. It enqueues one `SimPairMessageQueue` row per pair (due at the last sent message + `pairing_conversation_interval_minutes` × a 1.0–1.35 jitter), then serves due items **ordered by `sent_count >= target_messages` first** so no pair passes its target while another is short of it. Pacing lives in that durable queue, not in the trigger: `pairing_max_messages_per_run` is a ceiling on run duration, not a cadence knob. A module-level `asyncio.Lock` serializes the scheduler job against manual `POST /sim-pairing/conversations/run`, which deliberately obeys the same cadence rather than bypassing it.
+
+`_select_batch()` is a pure function (no session, no client) applying three rules: both SIMs `IDLE` with a phone number — the only rule that writes, deferring the item 15 minutes — then one message per SIM per run, then `pairing_sim_cooldown_minutes` since that SIM last sent *or received*. The last two mark an item *held*: nothing is written and it is first in line next run. Failures retry twice more then mark the queue row `failed`. Message text comes from **OpenRouter** via the `openai` SDK pointed at `https://openrouter.ai/api/v1` — a fourth provider path, unrelated to `LlmService` — with the last `HISTORY_LIMIT` (12) sent messages as transcript; output is French, capped at 240 chars, and rejected outright if longer.
+
+Quiet hours are fleet-wide and in **UTC** (default 22:00–07:00, enabled) — no per-country local time is computed anywhere. `_quiet_window()` / `_is_quiet()` / `_shift_out_of_quiet()` are pure; equal bounds mean *no* quiet window, not a silent day. The window is applied twice on purpose: `_enqueue_pairs()` shifts a due time landing inside it to just after, spread over 90 min, which keeps `overdue` honest; a run-time guard then catches items queued before the setting changed and 15-minute retries. Previews still work at night.
+
+Fleet capacity is `pairing_max_messages_per_run × 4 × sending_hours`/day — 600 at the defaults, not 960, because the job only sends outside the quiet window. Below `capacity ÷ (1440 ÷ interval)` active pairs (75 at the defaults) the system is interval-bound, which is the healthy regime; above it the queue accumulates and the configured interval stops meaning anything. `GET /sim-pairing/queue/stats` exposes that backlog.
+
+`POST /sim-pairing/conversations/preview` is a strict dry run: it generates one candidate SMS and touches nothing — no sync, no `SimPairMessage`, no TmLite call.
 
 ### Stress Call
 
@@ -68,6 +86,6 @@ A director dashboard, populated by a daily cron rather than user action. `Docume
 - One file per entity across `models/`, `schemas/`, `routers/`, `services/`. Every model must be exported from `app/models/__init__.py` or Alembic autogenerate misses it. Model changes require a migration.
 - MCP tool dicts use the snake_case key `input_schema` (from the `McpToolInfo` schema), not the MCP wire name `inputSchema`.
 - All frontend HTTP calls and shared TypeScript interfaces go in `frontend/src/lib/api.ts` — no ad-hoc `fetch` in components. Routes are declared in `src/App.tsx` under a single `AppShell` layout, one page per tab.
-- `Config` and MCP server API keys are Fernet-encrypted (`utils/crypto.py`); the API must only ever expose `api_key_set: bool`, never the value.
+- `Config.api_key`, `Config.pairing_openrouter_api_key`, `Config.google_sa_key` and MCP server API keys are Fernet-encrypted (`utils/crypto.py`); the API must only ever expose `*_set: bool` flags, never the values.
 - Conventional Commits (`feat(chat): ...`). Code, comments, docs and UI in English — the chat assistant's French output is the one exception.
 - Design specs live in `docs/superpowers/specs/` and plans in `docs/superpowers/plans/`; check them before large changes.
