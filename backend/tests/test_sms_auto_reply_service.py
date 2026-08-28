@@ -314,17 +314,22 @@ async def test_an_empty_sim_list_stops_the_run(session):
 
 
 async def test_sims_with_unusable_numbers_also_stop_the_run(session):
-    # A non-empty list_sims whose phone_number values are junk (null, empty, or
-    # otherwise digit-free, as the rules module's own comment records really
-    # happens) reduces to an empty fleet via fleet_numbers(), which is exactly
-    # as dangerous as an empty list_sims: is_fleet_number() would answer False
-    # for everything and the fleet's own SIM-pairing traffic would become a
-    # trigger.
+    # A non-empty list_sims whose phone_number values are junk reduces to a
+    # fleet that matches nothing, which is exactly as dangerous as an empty
+    # list_sims: is_fleet_number() would answer False for everything and the
+    # fleet's own SIM-pairing traffic would become a trigger. Two distinct
+    # kinds of junk are covered here: values fleet_numbers() drops outright
+    # (null, empty, digit-free), which used to be the only case tested; and a
+    # short-but-nonzero value ("1") that survives fleet_numbers() into a
+    # *non-empty* fleet but falls under MIN_MATCH_DIGITS, so same_number()
+    # still matches nothing. A plain `not fleet` check would miss the second
+    # case entirely, which is the gap this test guards against.
     await _configure(session)
     junk_sims = [
         {"id": 1, "phone_number": None, "gateway_name": "CIV-RED-1", "slot": 1, "state": "IDLE"},
         {"id": 2, "phone_number": "", "gateway_name": "CIV-RED-2", "slot": 2, "state": "IDLE"},
         {"id": 3, "phone_number": "n/a", "gateway_name": "CIV-RED-3", "slot": 3, "state": "IDLE"},
+        {"id": 4, "phone_number": "1", "gateway_name": "CIV-RED-4", "slot": 4, "state": "IDLE"},
     ]
     with _tmlite(sms=[_sms("1", 872, "0748524199")],
                  calls=[_call("33600000002", "0748524199")], sims=junk_sims) as sent:

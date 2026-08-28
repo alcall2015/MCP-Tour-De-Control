@@ -62,15 +62,19 @@ class SmsAutoReplyService:
             # than a state to work from. Carrying on with an empty `fleet` would
             # make is_fleet_number() false for everything: the fleet's own
             # SIM-pairing SMS would become triggers and we would auto-reply to
-            # our own SIMs. Stop instead — and check `fleet` itself, not just
-            # `sims`, because a non-empty SIM list whose rows carry null, empty
-            # or otherwise digit-free phone_number values (real junk — see
-            # fleet_numbers()) still reduces to an empty fleet.
+            # our own SIMs. Stop instead — and check for a *usable* number, not
+            # just a non-empty `fleet` set, because fleet_numbers() only drops
+            # digit-free values. A short-but-nonzero phone_number (e.g. a stray
+            # "1" in a SIM row) survives into `fleet` but falls under
+            # MIN_MATCH_DIGITS, so same_number() — and therefore
+            # is_fleet_number() — would still answer False for every real
+            # number, which is exactly the broken state this guard exists to
+            # catch.
             if not sims:
                 return {"sent": 0, "skipped": 0, "failed": 0,
                         "reason": "TmLite returned no SIM cards; refusing to run without a fleet"}
             fleet = rules.fleet_numbers(sims)
-            if not fleet:
+            if not any(len(number) >= rules.MIN_MATCH_DIGITS for number in fleet):
                 return {"sent": 0, "skipped": 0, "failed": 0,
                         "reason": "TmLite returned SIMs with no usable phone numbers; refusing to run without a fleet"}
             index = sim_index(sims)
