@@ -36,7 +36,7 @@ def normalize_call(raw: dict) -> dict | None:
     caller, callee = _first(raw, "caller"), _first(raw, "callee")
     if ref is None or caller is None or callee is None:
         return None
-    slot = raw.get("sim_card_slot")
+    slot = _first(raw, "sim_card_slot", "slot")
     duration = raw.get("duration")
     return {
         "ref": f"call:{ref}",
