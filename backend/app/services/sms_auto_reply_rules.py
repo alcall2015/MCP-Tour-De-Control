@@ -86,14 +86,24 @@ def missed_call_trigger(calls: list[dict], fleet: set[str],
 def drop_recent_recipients(triggers: list[dict], recent: set[str]) -> list[dict]:
     """One person, one message per cooldown — whatever number format each
     source used, and however many times they were called."""
-    kept, seen = [], set()
+    kept = []
     for trigger in triggers:
-        target = digits(trigger["to_number"])
-        if not target or target in seen:
+        target = trigger["to_number"]
+        target_digits = digits(target)
+        if not target_digits:
             continue
-        if any(same_number(trigger["to_number"], r) for r in recent):
+        # Against the recipients already kept in this batch, compare with
+        # same_number() like everywhere else: the same person often appears
+        # twice in one run — once as an SMS sender, once as the most recent
+        # unanswered call — under two different formats, and digit equality
+        # would let both through as two identical messages. same_number()
+        # never matches values shorter than MIN_MATCH_DIGITS, so those still
+        # fall back to exact digit equality.
+        if any(same_number(target, k["to_number"]) or digits(k["to_number"]) == target_digits
+               for k in kept):
             continue
-        seen.add(target)
+        if any(same_number(target, r) for r in recent):
+            continue
         kept.append(trigger)
     return kept
 

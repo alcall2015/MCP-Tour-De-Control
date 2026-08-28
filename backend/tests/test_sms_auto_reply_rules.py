@@ -100,3 +100,16 @@ def test_a_recipient_messaged_recently_is_dropped():
 
 def test_the_template_is_rendered_verbatim():
     assert render("Ecris-moi au {whatsapp}.", "33600000002") == "Ecris-moi au 33600000002."
+
+
+def test_one_person_in_two_formats_gets_one_message_in_a_single_run():
+    # The same subscriber reaches us twice in one batch: once as an SMS sender
+    # stored without the country code, once as the most recent unanswered call
+    # stored with it. Only one message may go out.
+    triggers = [
+        {"ref": "sms:1", "kind": "sms", "sim_id": 872,
+         "to_number": "0700002222", "whatsapp": "33600000002"},
+        {"ref": "call:1", "kind": "missed_call", "sim_id": 872,
+         "to_number": "+2250700002222", "whatsapp": "33600000002"},
+    ]
+    assert [t["ref"] for t in drop_recent_recipients(triggers, set())] == ["sms:1"]
