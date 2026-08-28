@@ -18,6 +18,20 @@ def test_a_fleet_number_is_recognised_whatever_its_formatting():
     assert not is_fleet_number("0700003331", FLEET)
 
 
+def test_whatsapp_for_resolves_across_number_formats():
+    # Same person, one CDR stored with a country code, the other without.
+    calls = [_call("33600000002", "+2250788542981", "2026-08-28T12:00:00")]
+    assert whatsapp_for("0788542981", calls) == "33600000002"
+
+    calls = [_call("33600000002", "0788542981", "2026-08-28T12:00:00")]
+    assert whatsapp_for("+2250788542981", calls) == "33600000002"
+
+
+def test_a_short_garbage_fleet_entry_never_matches_a_real_number():
+    fleet = fleet_numbers([{"phone_number": "1"}])
+    assert not is_fleet_number("0700003331", fleet)
+
+
 def test_the_whatsapp_number_is_the_most_recent_caller_of_that_number():
     calls = [_call("33600000001", "0700003331", "2026-08-28T10:00:00"),
              _call("33600000002", "0700003331", "2026-08-28T12:00:00"),

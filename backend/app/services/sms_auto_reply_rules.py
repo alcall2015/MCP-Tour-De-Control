@@ -11,20 +11,36 @@ def digits(value) -> str:
     return re.sub(r"\D", "", str(value or ""))
 
 
+# Floor for suffix comparisons. Real fleet numbers are 9 digits (Guinea, e.g.
+# 614966686) or 10 digits (Ivory Coast, e.g. 0748524199), so 8 digits rejects
+# malformed data (e.g. a stray "1" in a SIM row's phone_number) without ever
+# rejecting a real number.
+MIN_MATCH_DIGITS = 8
+
+
+def same_number(a, b) -> bool:
+    """True if two values are the same subscriber, regardless of the format
+    each source used (country code, leading zero, ...), via digit-only suffix
+    matching. Every comparison in this module must go through here — the
+    TmLite API's number formats are inconsistent, so exact equality is never
+    correct. Inputs shorter than MIN_MATCH_DIGITS never match, so one
+    malformed short number can't silently swallow a whole number range."""
+    da, db = digits(a), digits(b)
+    if len(da) < MIN_MATCH_DIGITS or len(db) < MIN_MATCH_DIGITS:
+        return False
+    return da.endswith(db) or db.endswith(da)
+
+
 def fleet_numbers(sims: list[dict]) -> set[str]:
     return {digits(s.get("phone_number")) for s in sims if digits(s.get("phone_number"))}
 
 
 def is_fleet_number(number: str, fleet: set[str]) -> bool:
-    target = digits(number)
-    if not target:
-        return False
-    return any(target.endswith(owned) or owned.endswith(target) for owned in fleet if owned)
+    return any(same_number(number, owned) for owned in fleet)
 
 
 def whatsapp_for(target_number: str, calls: list[dict]) -> str | None:
-    target = digits(target_number)
-    matches = [c for c in calls if digits(c.get("callee")) == target and c.get("caller")]
+    matches = [c for c in calls if same_number(target_number, c.get("callee")) and c.get("caller")]
     if not matches:
         return None
     return max(matches, key=lambda c: c.get("at") or "")["caller"]
@@ -70,13 +86,12 @@ def missed_call_trigger(calls: list[dict], fleet: set[str],
 def drop_recent_recipients(triggers: list[dict], recent: set[str]) -> list[dict]:
     """One person, one message per cooldown — whatever number format each
     source used, and however many times they were called."""
-    recent_digits = {digits(n) for n in recent if digits(n)}
     kept, seen = [], set()
     for trigger in triggers:
         target = digits(trigger["to_number"])
         if not target or target in seen:
             continue
-        if any(target.endswith(r) or r.endswith(target) for r in recent_digits):
+        if any(same_number(trigger["to_number"], r) for r in recent):
             continue
         seen.add(target)
         kept.append(trigger)
