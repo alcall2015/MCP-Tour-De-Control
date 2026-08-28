@@ -52,6 +52,21 @@ def _to_read(config: Config) -> ConfigRead:
         google_sa_email=_google_sa_email(config),
         drive_folder_id=config.drive_folder_id,
         activity_cron=config.activity_cron,
+        pairing_openrouter_api_key_set=bool(config.pairing_openrouter_api_key),
+        pairing_openrouter_model=config.pairing_openrouter_model,
+        pairing_conversation_enabled=config.pairing_conversation_enabled,
+        pairing_conversation_interval_minutes=config.pairing_conversation_interval_minutes,
+        pairing_target_messages=config.pairing_target_messages,
+        pairing_max_messages_per_run=config.pairing_max_messages_per_run,
+        pairing_sim_cooldown_minutes=config.pairing_sim_cooldown_minutes,
+        pairing_quiet_hours_enabled=config.pairing_quiet_hours_enabled,
+        pairing_quiet_start_hour=config.pairing_quiet_start_hour,
+        pairing_quiet_end_hour=config.pairing_quiet_end_hour,
+        sms_autoreply_enabled=config.sms_autoreply_enabled,
+        sms_autoreply_template=config.sms_autoreply_template,
+        sms_autoreply_max_per_run=config.sms_autoreply_max_per_run,
+        sms_autoreply_lookback_minutes=config.sms_autoreply_lookback_minutes,
+        sms_autoreply_recipient_cooldown_hours=config.sms_autoreply_recipient_cooldown_hours,
         updated_at=config.updated_at,
     )
 
@@ -95,6 +110,60 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
     cron_changed = data.activity_cron is not None and data.activity_cron != config.activity_cron
     if data.activity_cron is not None:
         config.activity_cron = data.activity_cron
+    if data.pairing_openrouter_api_key is not None:
+        config.pairing_openrouter_api_key = encrypt_value(data.pairing_openrouter_api_key)
+    if data.pairing_openrouter_model is not None:
+        model = data.pairing_openrouter_model.strip()
+        if not model:
+            raise HTTPException(status_code=422, detail="pairing_openrouter_model must not be empty")
+        config.pairing_openrouter_model = model
+    if data.pairing_conversation_enabled is not None:
+        config.pairing_conversation_enabled = data.pairing_conversation_enabled
+    if data.pairing_conversation_interval_minutes is not None:
+        if not 30 <= data.pairing_conversation_interval_minutes <= 1440:
+            raise HTTPException(status_code=422, detail="pairing_conversation_interval_minutes must be between 30 and 1440")
+        config.pairing_conversation_interval_minutes = data.pairing_conversation_interval_minutes
+    if data.pairing_target_messages is not None:
+        if not 2 <= data.pairing_target_messages <= 100:
+            raise HTTPException(status_code=422, detail="pairing_target_messages must be between 2 and 100")
+        config.pairing_target_messages = data.pairing_target_messages
+    if data.pairing_max_messages_per_run is not None:
+        if not 1 <= data.pairing_max_messages_per_run <= 50:
+            raise HTTPException(status_code=422, detail="pairing_max_messages_per_run must be between 1 and 50")
+        config.pairing_max_messages_per_run = data.pairing_max_messages_per_run
+    if data.pairing_sim_cooldown_minutes is not None:
+        if not 0 <= data.pairing_sim_cooldown_minutes <= 240:
+            raise HTTPException(status_code=422, detail="pairing_sim_cooldown_minutes must be between 0 and 240")
+        config.pairing_sim_cooldown_minutes = data.pairing_sim_cooldown_minutes
+    if data.pairing_quiet_hours_enabled is not None:
+        config.pairing_quiet_hours_enabled = data.pairing_quiet_hours_enabled
+    for field in ("pairing_quiet_start_hour", "pairing_quiet_end_hour"):
+        hour = getattr(data, field)
+        if hour is not None:
+            if not 0 <= hour <= 23:
+                raise HTTPException(status_code=422, detail=f"{field} must be between 0 and 23")
+            setattr(config, field, hour)
+
+    if data.sms_autoreply_enabled is not None:
+        config.sms_autoreply_enabled = data.sms_autoreply_enabled
+    if data.sms_autoreply_template is not None:
+        template = data.sms_autoreply_template.strip()
+        if "{whatsapp}" not in template:
+            raise HTTPException(status_code=422, detail="sms_autoreply_template must contain {whatsapp}")
+        config.sms_autoreply_template = template
+    if data.sms_autoreply_max_per_run is not None:
+        if not 1 <= data.sms_autoreply_max_per_run <= 50:
+            raise HTTPException(status_code=422, detail="sms_autoreply_max_per_run must be between 1 and 50")
+        config.sms_autoreply_max_per_run = data.sms_autoreply_max_per_run
+    if data.sms_autoreply_lookback_minutes is not None:
+        if not 15 <= data.sms_autoreply_lookback_minutes <= 1440:
+            raise HTTPException(status_code=422, detail="sms_autoreply_lookback_minutes must be between 15 and 1440")
+        config.sms_autoreply_lookback_minutes = data.sms_autoreply_lookback_minutes
+    if data.sms_autoreply_recipient_cooldown_hours is not None:
+        if not 1 <= data.sms_autoreply_recipient_cooldown_hours <= 720:
+            raise HTTPException(status_code=422,
+                                detail="sms_autoreply_recipient_cooldown_hours must be between 1 and 720")
+        config.sms_autoreply_recipient_cooldown_hours = data.sms_autoreply_recipient_cooldown_hours
 
     await session.commit()
     await session.refresh(config)

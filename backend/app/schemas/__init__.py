@@ -6,6 +6,8 @@ from app.schemas.execution import ExecutionRead, ExecutionListParams
 from app.schemas.stress_test import StressTestCreate, StressTestRead, StressTestMetricsRead, StressTestCompareRequest, ScenarioInfo
 from app.schemas.chat import ConversationRead, ChatMessageRead, ChatMessageCreate
 from app.schemas.activity import DocumentRead, SectionRead, HeatmapDay, HeatmapRead, ScanResult
+from app.schemas.sim_pairing import SimPairingGroupCreate, SimPairingGroupRead, SimPairingTopicCreate, SimPairingTopicRead, SimPairRead, SimPairHistoryRead, SimPairMessageRead, SimPairMessageQueueRead
+from app.schemas.sms_reply import SmsReplyRead, SmsAutoReplyStats
 
 __all__ = [
     "ConfigRead", "ConfigUpdate",
@@ -16,4 +18,6 @@ __all__ = [
     "StressTestCreate", "StressTestRead", "StressTestMetricsRead", "StressTestCompareRequest", "ScenarioInfo",
     "ConversationRead", "ChatMessageRead", "ChatMessageCreate",
     "DocumentRead", "SectionRead", "HeatmapDay", "HeatmapRead", "ScanResult",
+    "SimPairingGroupCreate", "SimPairingGroupRead", "SimPairingTopicCreate", "SimPairingTopicRead", "SimPairRead", "SimPairHistoryRead", "SimPairMessageRead", "SimPairMessageQueueRead",
+    "SmsReplyRead", "SmsAutoReplyStats",
 ]
