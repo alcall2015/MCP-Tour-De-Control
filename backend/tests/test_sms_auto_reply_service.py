@@ -225,6 +225,33 @@ async def test_an_answered_call_is_not_followed_up(session):
     assert result["sent"] == 0 and sent == []
 
 
+async def test_a_dry_run_previews_even_when_the_feature_is_disabled(session):
+    # This is the whole point of dry_run: the feature ships disabled, and the
+    # documented first step is to preview what it *would* send before ever
+    # arming it. A dry run sends no SMS and writes no row by construction, so
+    # gating it on sms_autoreply_enabled protects nothing while blocking the
+    # only way to look before arming the unattended job.
+    await _configure(session, sms_autoreply_enabled=False)
+    with _tmlite(sms=[_sms("1", 872, "0700003331")], calls=[_call("33600000002", "0700003331")]) as sent:
+        result = await SmsAutoReplyService.run(session, dry_run=True)
+    assert sent == []
+    assert result["previews"][0]["to_number"] == "0700003331"
+    assert result["previews"][0]["content"] is not None
+    assert (await session.execute(select(SmsReply))).scalars().all() == []
+
+
+async def test_a_real_run_still_stays_gated_when_disabled(session):
+    # Proves the enabled gate was narrowed to the real-run path, not removed
+    # outright: with the exact same sendable payload that the dry-run test
+    # above previews successfully, a real run must still refuse to send.
+    await _configure(session, sms_autoreply_enabled=False)
+    with _tmlite(sms=[_sms("1", 872, "0700003331")], calls=[_call("33600000002", "0700003331")]) as sent:
+        result = await SmsAutoReplyService.run(session)
+    assert result["sent"] == 0 and sent == []
+    assert result["reason"] == "SMS auto-reply is disabled"
+    assert (await session.execute(select(SmsReply))).scalars().all() == []
+
+
 async def test_a_dry_run_sends_nothing_and_stores_nothing(session):
     await _configure(session)
     with _tmlite(sms=[_sms("1", 872, "0700003331")], calls=[_call("33600000002", "0700003331")]) as sent:

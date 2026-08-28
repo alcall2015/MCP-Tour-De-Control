@@ -39,7 +39,12 @@ class SmsAutoReplyService:
     @staticmethod
     async def _run(session, dry_run: bool) -> dict:
         config = (await session.execute(select(Config).limit(1))).scalar_one_or_none()
-        if not config or not config.sms_autoreply_enabled:
+        # A dry run sends no SMS and writes no row by construction, so gating
+        # it on the enabled flag protects nothing while removing the only
+        # affordance an operator has to inspect the feature before arming it.
+        # The gate stays exactly as it was for a real run (dry_run=False):
+        # only a missing config still blocks a preview.
+        if not config or (not dry_run and not config.sms_autoreply_enabled):
             return {"sent": 0, "skipped": 0, "failed": 0, "reason": "SMS auto-reply is disabled"}
 
         window = quiet_hours.quiet_window(config)
