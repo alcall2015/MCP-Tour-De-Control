@@ -58,6 +58,14 @@ class SmsAutoReplyService:
         since = datetime.now(timezone.utc) - timedelta(minutes=config.sms_autoreply_lookback_minutes)
         async with Client(_build_http_transport(server.url, server.api_key)) as client:
             sims = await SmsAutoReplyService._all_sims(client)
+            # An empty fleet is never valid, so it is an upstream failure rather
+            # than a state to work from. Carrying on would empty `fleet` too,
+            # making is_fleet_number() false for everything: the fleet's own
+            # SIM-pairing SMS would become triggers and we would auto-reply to
+            # our own SIMs. Stop instead.
+            if not sims:
+                return {"sent": 0, "skipped": 0, "failed": 0,
+                        "reason": "TmLite returned no SIM cards; refusing to run without a fleet"}
             fleet = rules.fleet_numbers(sims)
             index = sim_index(sims)
             messages = [m for m in (normalize_sms(r) for r in await SmsAutoReplyService._recent_sms(client, since)) if m]
@@ -104,39 +112,97 @@ class SmsAutoReplyService:
                     continue
 
                 if reason:
-                    session.add(SmsReply(trigger_kind=trigger["kind"], trigger_ref=trigger["ref"],
-                                         sim_id=trigger["sim_id"] or 0, to_number=trigger["to_number"],
-                                         whatsapp_number=trigger["whatsapp"], content="", status="skipped",
-                                         error=reason))
-                    await session.commit()
-                    skipped += 1
+                    if await SmsAutoReplyService._store(
+                        session,
+                        SmsReply(trigger_kind=trigger["kind"], trigger_ref=trigger["ref"],
+                                 sim_id=trigger["sim_id"] or 0, to_number=trigger["to_number"],
+                                 whatsapp_number=trigger["whatsapp"], content="", status="skipped",
+                                 error=reason),
+                        trigger["ref"],
+                    ):
+                        skipped += 1
                     continue
 
                 content = rules.render(config.sms_autoreply_template, trigger["whatsapp"])
                 reply = SmsReply(trigger_kind=trigger["kind"], trigger_ref=trigger["ref"],
                                  sim_id=trigger["sim_id"], to_number=trigger["to_number"],
-                                 whatsapp_number=trigger["whatsapp"], content=content, status="sent")
-                session.add(reply)
+                                 whatsapp_number=trigger["whatsapp"], content=content, status="sending")
+                # Claim the trigger before sending, never after. If the process
+                # dies, is redeployed, or loses the database between the send
+                # and the outcome, this committed row still holds the
+                # trigger_ref and feeds the recipient cooldown, so the next run
+                # treats this person as handled. That biases the service to
+                # at-most-once: the worst case is a recipient who gets nothing,
+                # never one who gets the same unsolicited SMS twice.
+                if not await SmsAutoReplyService._store(session, reply, trigger["ref"]):
+                    failed += 1
+                    continue
+
                 try:
-                    await session.flush()
                     await client.call_tool("send_sms", {"from_sim_id": trigger["sim_id"],
                                                         "to_number": trigger["to_number"], "text": content})
-                    reply.sent_at = datetime.now(timezone.utc)
-                    await session.commit()
-                    sent += 1
                 except Exception as exc:
-                    await session.rollback()
-                    session.add(SmsReply(trigger_kind=trigger["kind"], trigger_ref=trigger["ref"],
-                                         sim_id=trigger["sim_id"], to_number=trigger["to_number"],
-                                         whatsapp_number=trigger["whatsapp"], content=content,
-                                         status="failed", error=str(exc)))
-                    await session.commit()
+                    # The row already exists: record the failure on it. Inserting
+                    # a second row with the same trigger_ref would raise
+                    # IntegrityError here and drop every remaining trigger.
+                    await SmsAutoReplyService._record_outcome(session, reply, "failed", error=str(exc))
                     failed += 1
+                    continue
+
+                await SmsAutoReplyService._record_outcome(session, reply, "sent",
+                                                          sent_at=datetime.now(timezone.utc))
+                sent += 1
 
         result = {"sent": sent, "skipped": skipped, "failed": failed}
         if dry_run:
             result["previews"] = previews
         return result
+
+    @staticmethod
+    async def _store(session, reply: SmsReply, ref: str) -> bool:
+        """Insert one row and commit it, reporting success rather than raising.
+
+        A trigger whose bookkeeping fails must cost only itself: an exception
+        escaping here would drop every remaining trigger in the batch and fail
+        the whole run.
+        """
+        session.add(reply)
+        try:
+            await session.commit()
+            return True
+        except Exception:
+            log.exception("sms_auto_reply_claim_failed", trigger_ref=ref)
+            await SmsAutoReplyService._safe_rollback(session, ref)
+            return False
+
+    @staticmethod
+    async def _record_outcome(session, reply: SmsReply, status: str, error: str | None = None,
+                              sent_at: datetime | None = None) -> None:
+        """Write the outcome onto the row claimed before the send.
+
+        This updates; it never inserts. The row is already committed, so a
+        second insert carrying the same trigger_ref would violate the UNIQUE
+        constraint. Its own database work is guarded for the same reason as
+        `_store`: one trigger must never cost the others their turn.
+        """
+        ref = reply.trigger_ref
+        try:
+            reply.status = status
+            reply.error = error
+            reply.sent_at = sent_at
+            await session.commit()
+        except Exception:
+            # The send already happened (or already failed); only the record of
+            # it is lost. The row stays in "sending", which stats() counts.
+            log.exception("sms_auto_reply_outcome_not_recorded", trigger_ref=ref, status=status)
+            await SmsAutoReplyService._safe_rollback(session, ref)
+
+    @staticmethod
+    async def _safe_rollback(session, ref: str) -> None:
+        try:
+            await session.rollback()
+        except Exception:
+            log.exception("sms_auto_reply_rollback_failed", trigger_ref=ref)
 
     @staticmethod
     def _naive_iso(when: datetime) -> str:
@@ -199,7 +265,10 @@ class SmsAutoReplyService:
     @staticmethod
     async def stats(session) -> dict:
         counts = {}
-        for status in ("sent", "failed", "skipped"):
+        # "sending" is counted too: a row left in it is a claimed trigger whose
+        # outcome was never written back (a crash between the send and the
+        # update). Those must surface, not vanish from the totals.
+        for status in ("sent", "failed", "skipped", "sending"):
             counts[status] = await session.scalar(
                 select(func.count()).select_from(SmsReply).where(SmsReply.status == status)
             ) or 0

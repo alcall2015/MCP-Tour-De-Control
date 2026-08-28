@@ -13,6 +13,8 @@ class SmsReply(Base):
 
     `trigger_ref` is unique on purpose: the 15-minute job re-reads an
     overlapping window, and this constraint is what stops a second reply.
+    The row is committed as "sending" before the SMS leaves, so a crash
+    mid-send leaves the trigger claimed rather than free to be answered again.
     """
 
     __tablename__ = "sms_reply"
@@ -24,7 +26,7 @@ class SmsReply(Base):
     to_number: Mapped[str] = mapped_column(String(40))
     whatsapp_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
     content: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default="sent")  # sent | failed | skipped
+    status: Mapped[str] = mapped_column(String(20), default="sent")  # sending | sent | failed | skipped
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

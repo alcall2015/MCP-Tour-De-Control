@@ -24,4 +24,6 @@ class SmsAutoReplyStats(BaseModel):
     sent: int
     failed: int
     skipped: int
+    # Claimed but never resolved: the send outcome was not written back.
+    sending: int
     last_sent_at: datetime | None
