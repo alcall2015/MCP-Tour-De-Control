@@ -155,15 +155,43 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
         if not 1 <= data.sms_autoreply_max_per_run <= 50:
             raise HTTPException(status_code=422, detail="sms_autoreply_max_per_run must be between 1 and 50")
         config.sms_autoreply_max_per_run = data.sms_autoreply_max_per_run
+    # The lower bound is 30, not the 15-minute job interval: with APScheduler's
+    # coalesce=True a restart longer than one interval collapses the missed runs
+    # into a single one, so a window equal to the interval never reads the
+    # skipped gap and a real customer's SMS is never answered. The window must
+    # always outlast one interval.
     if data.sms_autoreply_lookback_minutes is not None:
-        if not 15 <= data.sms_autoreply_lookback_minutes <= 1440:
-            raise HTTPException(status_code=422, detail="sms_autoreply_lookback_minutes must be between 15 and 1440")
-        config.sms_autoreply_lookback_minutes = data.sms_autoreply_lookback_minutes
+        if not 30 <= data.sms_autoreply_lookback_minutes <= 1440:
+            raise HTTPException(status_code=422, detail="sms_autoreply_lookback_minutes must be between 30 and 1440")
     if data.sms_autoreply_recipient_cooldown_hours is not None:
         if not 1 <= data.sms_autoreply_recipient_cooldown_hours <= 720:
             raise HTTPException(status_code=422,
                                 detail="sms_autoreply_recipient_cooldown_hours must be between 1 and 720")
-        config.sms_autoreply_recipient_cooldown_hours = data.sms_autoreply_recipient_cooldown_hours
+    # A trigger dropped by the per-recipient cooldown is not recorded anywhere,
+    # so it stays inside the lookback window and fires again the moment the
+    # cooldown expires. Keeping the window no longer than the cooldown means
+    # such a trigger has left the window before it can be picked up again, so
+    # one burst of SMS from one person costs that person one reply. Both fields
+    # are optional in a request, so the pair is checked on its effective values:
+    # whatever is incoming, compared against what is already stored.
+    lookback = (data.sms_autoreply_lookback_minutes
+                if data.sms_autoreply_lookback_minutes is not None
+                else config.sms_autoreply_lookback_minutes)
+    cooldown = (data.sms_autoreply_recipient_cooldown_hours
+                if data.sms_autoreply_recipient_cooldown_hours is not None
+                else config.sms_autoreply_recipient_cooldown_hours)
+    if lookback > cooldown * 60:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"sms_autoreply_lookback_minutes ({lookback}) must not exceed "
+                    f"sms_autoreply_recipient_cooldown_hours * 60 ({cooldown * 60}): a trigger held back by "
+                    "the cooldown stays in the lookback window and would be answered again once the "
+                    "cooldown expires, sending the same person several unsolicited messages"),
+        )
+    if data.sms_autoreply_lookback_minutes is not None:
+        config.sms_autoreply_lookback_minutes = lookback
+    if data.sms_autoreply_recipient_cooldown_hours is not None:
+        config.sms_autoreply_recipient_cooldown_hours = cooldown
 
     await session.commit()
     await session.refresh(config)

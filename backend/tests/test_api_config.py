@@ -54,3 +54,37 @@ async def test_update_config():
         resp = await client.put("/api/v1/config", json={"llm_provider": "anthropic", "llm_model": "claude-3"})
     assert resp.status_code == 200
     assert resp.json()["llm_provider"] == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_a_lookback_no_longer_than_the_job_interval_is_rejected():
+    # The job runs every 15 minutes and APScheduler coalesces missed runs, so a
+    # window equal to the interval never reads the gap left by a restart.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        too_short = await client.put("/api/v1/config", json={"sms_autoreply_lookback_minutes": 15})
+        assert too_short.status_code == 422
+        assert "30" in too_short.json()["detail"]
+        ok = await client.put("/api/v1/config", json={"sms_autoreply_lookback_minutes": 30})
+        assert ok.status_code == 200
+        assert ok.json()["sms_autoreply_lookback_minutes"] == 30
+
+
+@pytest.mark.asyncio
+async def test_a_lookback_longer_than_the_recipient_cooldown_is_rejected():
+    # A trigger held back by the cooldown is recorded nowhere, so it stays in
+    # the lookback window and fires again as soon as the cooldown expires.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        both = await client.put("/api/v1/config", json={
+            "sms_autoreply_lookback_minutes": 120,
+            "sms_autoreply_recipient_cooldown_hours": 1,
+        })
+        assert both.status_code == 422
+        assert "cooldown" in both.json()["detail"]
+
+        # And on the effective pair: a request may carry only one of the two,
+        # so the incoming value is checked against the stored one.
+        stored = await client.put("/api/v1/config", json={"sms_autoreply_lookback_minutes": 1440})
+        assert stored.status_code == 200
+        alone = await client.put("/api/v1/config", json={"sms_autoreply_recipient_cooldown_hours": 1})
+        assert alone.status_code == 422
+        assert "1440" in alone.json()["detail"]
