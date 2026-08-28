@@ -14,6 +14,8 @@ from app.routers import executions as executions_router
 from app.routers import mcp_servers as mcp_servers_router
 from app.routers import prompts as prompts_router
 from app.routers import scripts as scripts_router
+from app.routers import sim_pairing as sim_pairing_router
+from app.routers import sms_auto_reply as sms_auto_reply_router
 from app.routers import stress_tests as stress_tests_router
 from app.services.scheduler_service import scheduler_service
 
@@ -81,6 +83,10 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.warning("Failed to auto-register sipp-stress", error=str(exc))
 
+    scheduler_service.set_pairing_job()
+    scheduler_service.set_pair_conversation_job()
+    scheduler_service.set_sms_auto_reply_job()
+
     yield
 
     scheduler_service.shutdown()
@@ -102,6 +108,8 @@ app.include_router(executions_router.router)
 app.include_router(mcp_servers_router.router)
 app.include_router(prompts_router.router)
 app.include_router(scripts_router.router)
+app.include_router(sim_pairing_router.router)
+app.include_router(sms_auto_reply_router.router)
 app.include_router(stress_tests_router.router)
 app.include_router(chat_router.router)
 app.include_router(activity_router.router)

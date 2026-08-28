@@ -4,6 +4,7 @@ import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 
@@ -56,6 +57,35 @@ async def _execute_activity_scan():
         log.info("Activity scan completed", documents=count)
     except Exception as exc:
         log.error("Activity scan failed", error=str(exc))
+
+
+async def _execute_sim_pairing_sync():
+    from app.database import async_session
+    from app.services.sim_pairing_service import SimPairingService
+    async with async_session() as session:
+        await SimPairingService.sync(session)
+
+
+async def _execute_sim_pair_conversation():
+    from app.database import async_session
+    from app.services.sim_pair_conversation_service import SimPairConversationService
+    try:
+        async with async_session() as session:
+            summary = await SimPairConversationService.run_due(session)
+        log.info("SIM pair conversation run completed", **summary)
+    except Exception as exc:
+        log.error("SIM pair conversation run failed", error=str(exc))
+
+
+async def _execute_sms_auto_reply():
+    from app.database import async_session
+    from app.services.sms_auto_reply_service import SmsAutoReplyService
+    try:
+        async with async_session() as session:
+            summary = await SmsAutoReplyService.run(session)
+        log.info("SMS auto-reply run completed", **summary)
+    except Exception as exc:
+        log.error("SMS auto-reply run failed", error=str(exc))
 
 
 class SchedulerService:
@@ -126,6 +156,9 @@ class SchedulerService:
             self.add_job(prompt_id, cron_expr)
 
     ACTIVITY_JOB_ID = "activity_scan"
+    PAIRING_JOB_ID = "sim_pairing_sync"
+    PAIR_CONVERSATION_JOB_ID = "sim_pair_conversation"
+    SMS_AUTO_REPLY_JOB_ID = "sms_auto_reply"
 
     def set_activity_job(self, cron_expr: str):
         """Create or reschedule the daily activity scan."""
@@ -136,6 +169,15 @@ class SchedulerService:
             replace_existing=True,
         )
         log.info("Activity job scheduled", cron=cron_expr)
+
+    def set_pairing_job(self):
+        self.scheduler.add_job(_execute_sim_pairing_sync, trigger=IntervalTrigger(minutes=15), id=self.PAIRING_JOB_ID, replace_existing=True)
+
+    def set_pair_conversation_job(self):
+        self.scheduler.add_job(_execute_sim_pair_conversation, trigger=IntervalTrigger(minutes=15), id=self.PAIR_CONVERSATION_JOB_ID, replace_existing=True)
+
+    def set_sms_auto_reply_job(self):
+        self.scheduler.add_job(_execute_sms_auto_reply, trigger=IntervalTrigger(minutes=15), id=self.SMS_AUTO_REPLY_JOB_ID, replace_existing=True)
 
 
 def is_valid_cron(cron_expr: str) -> bool:
