@@ -73,6 +73,9 @@ export function SmsAutoReplyPage() {
           <label className="flex items-center gap-3 text-sm" style={{ color: "var(--text-primary)" }}>
             <input type="checkbox" checked={activeEnabled} onChange={(event) => setEnabled(event.target.checked)} /> Enable SMS auto-reply
           </label>
+          <p className="text-xs" style={{ color: "var(--warning)" }}>
+            Once enabled, this runs unattended every 15 minutes and sends real SMS to numbers outside the fleet on its own — no further action needed, and "Run now" is not required to trigger it.
+          </p>
           <label className="text-sm" style={{ color: "var(--text-secondary)" }}>
             Reply template
             <textarea
