@@ -136,6 +136,35 @@ async def test_the_same_trigger_is_never_answered_twice(session):
     assert second["sent"] == 0 and sent == []
 
 
+async def test_the_ref_dedupe_alone_stops_a_repeat_once_the_cooldown_has_expired(session):
+    # test_the_same_trigger_is_never_answered_twice passes even with the
+    # trigger_ref dedupe query deleted, because the 24h recipient cooldown
+    # alone also suppresses the second run. Here the stored reply's
+    # created_at is pushed outside the cooldown window before the second run,
+    # so only the trigger_ref filter can be responsible for the trigger being
+    # skipped a second time. This is the scenario that matters in production
+    # whenever the lookback window is configured longer than the cooldown.
+    config = await _configure(session)
+    payload = dict(sms=[_sms("1", 872, "0700003331")], calls=[_call("33600000002", "0700003331")])
+    with _tmlite(**payload):
+        first = await SmsAutoReplyService.run(session)
+    assert first["sent"] == 1
+
+    row = (await session.execute(select(SmsReply))).scalar_one()
+    row.created_at = datetime.now(timezone.utc) - timedelta(
+        hours=config.sms_autoreply_recipient_cooldown_hours + 1)
+    await session.commit()
+
+    with _tmlite(**payload) as sent:
+        second = await SmsAutoReplyService.run(session)
+    # Not just "sent == 0": if the trigger_ref filter were gone, the trigger
+    # would still reach _store(), which would then hit the DB's UNIQUE
+    # constraint on trigger_ref and report a failure instead of silently
+    # doing nothing. Asserting failed == 0 too is what forces the trigger to
+    # have been dropped before ever attempting to claim it.
+    assert second["sent"] == 0 and second["failed"] == 0 and sent == []
+
+
 async def test_an_unresolvable_whatsapp_number_is_skipped_not_sent(session):
     await _configure(session)
     with _tmlite(sms=[_sms("1", 872, "0788888888")], calls=[]) as sent:
@@ -284,6 +313,27 @@ async def test_an_empty_sim_list_stops_the_run(session):
     assert (await session.execute(select(SmsReply))).scalars().all() == []
 
 
+async def test_sims_with_unusable_numbers_also_stop_the_run(session):
+    # A non-empty list_sims whose phone_number values are junk (null, empty, or
+    # otherwise digit-free, as the rules module's own comment records really
+    # happens) reduces to an empty fleet via fleet_numbers(), which is exactly
+    # as dangerous as an empty list_sims: is_fleet_number() would answer False
+    # for everything and the fleet's own SIM-pairing traffic would become a
+    # trigger.
+    await _configure(session)
+    junk_sims = [
+        {"id": 1, "phone_number": None, "gateway_name": "CIV-RED-1", "slot": 1, "state": "IDLE"},
+        {"id": 2, "phone_number": "", "gateway_name": "CIV-RED-2", "slot": 2, "state": "IDLE"},
+        {"id": 3, "phone_number": "n/a", "gateway_name": "CIV-RED-3", "slot": 3, "state": "IDLE"},
+    ]
+    with _tmlite(sms=[_sms("1", 872, "0748524199")],
+                 calls=[_call("33600000002", "0748524199")], sims=junk_sims) as sent:
+        result = await SmsAutoReplyService.run(session)
+    assert result["sent"] == 0 and sent == []
+    assert "SIM" in result["reason"]
+    assert (await session.execute(select(SmsReply))).scalars().all() == []
+
+
 async def test_the_trigger_is_committed_before_the_message_goes_out(session, setup_db):
     """A crash between send_sms returning and the outcome being written must
     not leave the trigger free to be answered again. Only a committed row
@@ -328,6 +378,17 @@ async def test_a_send_failure_is_recorded_on_the_claimed_row_and_the_batch_conti
     with _tmlite(**payload) as sent:
         second = await SmsAutoReplyService.run(session)
     assert second["sent"] == 0 and sent == []
+
+
+async def test_sms_reply_defaults_to_sending_not_sent(session):
+    """The service always passes status explicitly today, so this default is
+    only a safety net for the next author who doesn't. It must never claim a
+    message went out when none did."""
+    reply = SmsReply(trigger_kind="sms", trigger_ref="sms:default-check", sim_id=1,
+                     to_number="0700000000", whatsapp_number=None, content="x")
+    session.add(reply)
+    await session.commit()
+    assert reply.status == "sending"
 
 
 async def test_stats_counts_a_claim_whose_outcome_was_never_written(session):

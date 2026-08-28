@@ -59,14 +59,20 @@ class SmsAutoReplyService:
         async with Client(_build_http_transport(server.url, server.api_key)) as client:
             sims = await SmsAutoReplyService._all_sims(client)
             # An empty fleet is never valid, so it is an upstream failure rather
-            # than a state to work from. Carrying on would empty `fleet` too,
-            # making is_fleet_number() false for everything: the fleet's own
+            # than a state to work from. Carrying on with an empty `fleet` would
+            # make is_fleet_number() false for everything: the fleet's own
             # SIM-pairing SMS would become triggers and we would auto-reply to
-            # our own SIMs. Stop instead.
+            # our own SIMs. Stop instead — and check `fleet` itself, not just
+            # `sims`, because a non-empty SIM list whose rows carry null, empty
+            # or otherwise digit-free phone_number values (real junk — see
+            # fleet_numbers()) still reduces to an empty fleet.
             if not sims:
                 return {"sent": 0, "skipped": 0, "failed": 0,
                         "reason": "TmLite returned no SIM cards; refusing to run without a fleet"}
             fleet = rules.fleet_numbers(sims)
+            if not fleet:
+                return {"sent": 0, "skipped": 0, "failed": 0,
+                        "reason": "TmLite returned SIMs with no usable phone numbers; refusing to run without a fleet"}
             index = sim_index(sims)
             messages = [m for m in (normalize_sms(r) for r in await SmsAutoReplyService._recent_sms(client, since)) if m]
             calls = [c for c in (normalize_call(r) for r in await SmsAutoReplyService._recent_calls(client, since)) if c]

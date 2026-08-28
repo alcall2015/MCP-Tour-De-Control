@@ -26,7 +26,7 @@ class SmsReply(Base):
     to_number: Mapped[str] = mapped_column(String(40))
     whatsapp_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
     content: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default="sent")  # sending | sent | failed | skipped
+    status: Mapped[str] = mapped_column(String(20), default="sending")  # sending | sent | failed | skipped
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
