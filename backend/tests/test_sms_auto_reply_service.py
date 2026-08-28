@@ -339,6 +339,34 @@ async def test_sims_with_unusable_numbers_also_stop_the_run(session):
     assert (await session.execute(select(SmsReply))).scalars().all() == []
 
 
+async def test_unprovisioned_sims_with_no_phone_number_are_ignored_not_stopped(session):
+    # Production shape: spare/unprovisioned cards carry phone_number: None and
+    # no SIM group. TmLite holds no number for them, so they are not sending
+    # SMS whose sender we would need to recognise — they must not enter the
+    # fleet set and must not block a run that otherwise has a perfectly usable
+    # fleet number.
+    await _configure(session)
+    sims = DEFAULT_SIMS + [
+        {"id": 772, "phone_number": None, "slot": 1, "state": "PENDING_CHECK",
+         "sim_group_name": None, "gateway_name": "CIV-RED-1"},
+        {"id": 771, "phone_number": None, "slot": 1, "state": "PENDING_CHECK",
+         "sim_group_name": None, "gateway_name": "CIV-RED-2"},
+        {"id": 467, "phone_number": None, "slot": 2, "state": "IDLE",
+         "sim_group_name": None, "gateway_name": "CIV-RED-3"},
+        {"id": 466, "phone_number": None, "slot": 3, "state": "IDLE",
+         "sim_group_name": None, "gateway_name": "CIV-RED-4"},
+        {"id": 234, "phone_number": None, "slot": 4, "state": "IDLE",
+         "sim_group_name": None, "gateway_name": "CIV-RED-5"},
+        {"id": 107, "phone_number": None, "slot": 5, "state": "IDLE",
+         "sim_group_name": None, "gateway_name": "CIV-RED-6"},
+    ]
+    with _tmlite(sms=[_sms("1", 872, "0700003331")],
+                 calls=[_call("33600000002", "0700003331")], sims=sims) as sent:
+        result = await SmsAutoReplyService.run(session)
+    assert result["sent"] == 1
+    assert sent[0][1]["to_number"] == "0700003331"
+
+
 async def test_the_trigger_is_committed_before_the_message_goes_out(session, setup_db):
     """A crash between send_sms returning and the outcome being written must
     not leave the trigger free to be answered again. Only a committed row

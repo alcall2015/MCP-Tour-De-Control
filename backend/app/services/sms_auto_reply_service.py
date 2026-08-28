@@ -82,16 +82,21 @@ class SmsAutoReplyService:
             if not any(len(number) >= rules.MIN_MATCH_DIGITS for number in fleet):
                 return {"sent": 0, "skipped": 0, "failed": 0,
                         "reason": "TmLite returned SIMs with no usable phone numbers; refusing to run without a fleet"}
-            # Strictest of the three: the guard has to hold for *every* SIM, not
-            # for the fleet on average. A single SIM whose phone_number we
-            # cannot match is absent from `fleet`, so when SIM pairing makes it
-            # text a peer SIM, that message's sender is its true MSISDN, matches
-            # nothing, becomes a trigger — and we answer one of our own SIMs. We
-            # cannot recognise such a SIM's traffic, because we do not know its
-            # real number, so name the offending rows and let the operator fix
-            # the TmLite data instead of guessing.
+            # Strictest of the three: the guard has to hold for *every SIM that
+            # can actually send*, not for the fleet on average. A SIM with no
+            # phone_number at all is unprovisioned — TmLite holds no number for
+            # it, so it cannot be the sender of any SMS we would need to
+            # recognise, and it is silently skipped here rather than counted.
+            # A SIM whose phone_number is present but too short to match
+            # (e.g. a stray "1") is provisioned and can send: when SIM pairing
+            # makes it text a peer SIM, that message's sender is its true
+            # MSISDN, matches nothing, becomes a trigger — and we answer one of
+            # our own SIMs. We cannot recognise such a SIM's traffic, because
+            # we do not know its real number, so name the offending rows and
+            # let the operator fix the TmLite data instead of guessing.
             unusable = [s for s in sims
-                        if len(rules.digits(s.get("phone_number"))) < rules.MIN_MATCH_DIGITS]
+                        if rules.digits(s.get("phone_number"))
+                        and len(rules.digits(s.get("phone_number"))) < rules.MIN_MATCH_DIGITS]
             if unusable:
                 ids = ", ".join(str(s.get("id")) for s in unusable)
                 return {"sent": 0, "skipped": 0, "failed": 0,
