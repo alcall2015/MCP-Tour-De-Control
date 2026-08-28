@@ -404,3 +404,20 @@ async def test_stats_counts_a_claim_whose_outcome_was_never_written(session):
     stats = await SmsAutoReplyService.stats(session)
     assert stats["sending"] == 1
     assert stats["sent"] == 0 and stats["failed"] == 0 and stats["skipped"] == 0
+
+
+async def test_one_sim_with_an_unusable_number_stops_the_whole_run(session):
+    # The fleet guard has to hold for every SIM, not for the fleet on average.
+    # This SIM's real MSISDN is unknown to us, so its own SIM-pairing traffic
+    # would look like an outside contact and we would auto-reply to it. The
+    # reason names how many rows are affected and their ids so the operator can
+    # fix the TmLite data.
+    await _configure(session)
+    sims = DEFAULT_SIMS + [{"id": 903, "phone_number": "1", "gateway_name": "CIV-RED-4",
+                            "slot": 4, "state": "IDLE"}]
+    with _tmlite(sms=[_sms("1", 872, "0700003331")],
+                 calls=[_call("33600000002", "0700003331")], sims=sims) as sent:
+        result = await SmsAutoReplyService.run(session)
+    assert result["sent"] == 0 and sent == []
+    assert "1 of 2" in result["reason"] and "903" in result["reason"]
+    assert (await session.execute(select(SmsReply))).scalars().all() == []

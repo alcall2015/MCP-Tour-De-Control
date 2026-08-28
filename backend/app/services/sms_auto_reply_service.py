@@ -58,6 +58,11 @@ class SmsAutoReplyService:
         since = datetime.now(timezone.utc) - timedelta(minutes=config.sms_autoreply_lookback_minutes)
         async with Client(_build_http_transport(server.url, server.api_key)) as client:
             sims = await SmsAutoReplyService._all_sims(client)
+            # Three stops of increasing strictness, all guarding the one
+            # invariant this feature exists to uphold: we must be able to
+            # recognise every message our own fleet sends, or we auto-reply to
+            # our own SIMs.
+            #
             # An empty fleet is never valid, so it is an upstream failure rather
             # than a state to work from. Carrying on with an empty `fleet` would
             # make is_fleet_number() false for everything: the fleet's own
@@ -77,6 +82,21 @@ class SmsAutoReplyService:
             if not any(len(number) >= rules.MIN_MATCH_DIGITS for number in fleet):
                 return {"sent": 0, "skipped": 0, "failed": 0,
                         "reason": "TmLite returned SIMs with no usable phone numbers; refusing to run without a fleet"}
+            # Strictest of the three: the guard has to hold for *every* SIM, not
+            # for the fleet on average. A single SIM whose phone_number we
+            # cannot match is absent from `fleet`, so when SIM pairing makes it
+            # text a peer SIM, that message's sender is its true MSISDN, matches
+            # nothing, becomes a trigger — and we answer one of our own SIMs. We
+            # cannot recognise such a SIM's traffic, because we do not know its
+            # real number, so name the offending rows and let the operator fix
+            # the TmLite data instead of guessing.
+            unusable = [s for s in sims
+                        if len(rules.digits(s.get("phone_number"))) < rules.MIN_MATCH_DIGITS]
+            if unusable:
+                ids = ", ".join(str(s.get("id")) for s in unusable)
+                return {"sent": 0, "skipped": 0, "failed": 0,
+                        "reason": f"{len(unusable)} of {len(sims)} SIMs have an unusable phone number "
+                                  f"(id: {ids}); fix them in TmLite before running"}
             index = sim_index(sims)
             messages = [m for m in (normalize_sms(r) for r in await SmsAutoReplyService._recent_sms(client, since)) if m]
             calls = [c for c in (normalize_call(r) for r in await SmsAutoReplyService._recent_calls(client, since)) if c]
