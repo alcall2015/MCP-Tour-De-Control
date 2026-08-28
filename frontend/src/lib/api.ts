@@ -29,6 +29,31 @@ export const deleteMcpServer = (id: string) =>
 export const testMcpServer = (id: string) =>
   request<McpTestResult>(`/mcp-servers/${id}/test`, { method: "POST" });
 
+// SIM pairing
+export const listSimPairingGroups = () => request<SimPairingGroup[]>("/sim-pairing/groups");
+export const createSimPairingGroup = (data: SimPairingGroupCreate) =>
+  request<SimPairingGroup>("/sim-pairing/groups", { method: "POST", body: JSON.stringify(data) });
+export const deleteSimPairingGroup = (id: string) =>
+  request<void>(`/sim-pairing/groups/${id}`, { method: "DELETE" });
+export const listSimPairingTopics = () => request<SimPairingTopic[]>("/sim-pairing/topics");
+export const createSimPairingTopic = (data: SimPairingTopicCreate) =>
+  request<SimPairingTopic>("/sim-pairing/topics", { method: "POST", body: JSON.stringify(data) });
+export const deleteSimPairingTopic = (id: string) => request<void>(`/sim-pairing/topics/${id}`, { method: "DELETE" });
+export const listSimPairs = () => request<SimPair[]>("/sim-pairing/pairs");
+export const listSimPairHistory = (id: string) => request<SimPairHistory[]>(`/sim-pairing/pairs/${id}/history`);
+export const listSimPairMessages = (id: string) => request<SimPairMessage[]>(`/sim-pairing/pairs/${id}/messages`);
+export const listSimPairMessageQueue = () => request<SimPairMessageQueue[]>("/sim-pairing/queue");
+export const getSimPairQueueStats = () => request<SimPairQueueStats>("/sim-pairing/queue/stats");
+export const syncSimPairs = () => request<SimPairingRun>("/sim-pairing/sync", { method: "POST" });
+export const runSimPairConversations = () => request<SimPairConversationRun>("/sim-pairing/conversations/run", { method: "POST" });
+export const previewSimPairConversation = () => request<SimPairConversationRun>("/sim-pairing/conversations/preview", { method: "POST" });
+
+// SMS auto-reply
+export const listSmsReplies = () => request<SmsReply[]>("/sms-autoreply/replies");
+export const getSmsAutoReplyStats = () => request<SmsAutoReplyStats>("/sms-autoreply/stats");
+export const runSmsAutoReply = () => request<SmsAutoReplyRun>("/sms-autoreply/run", { method: "POST" });
+export const previewSmsAutoReply = () => request<SmsAutoReplyRun>("/sms-autoreply/preview", { method: "POST" });
+
 // Prompts
 export const listPrompts = () => request<Prompt[]>("/prompts");
 export const createPrompt = (data: PromptCreate) =>
@@ -90,6 +115,21 @@ export interface Config {
   google_sa_email: string | null;
   drive_folder_id: string;
   activity_cron: string;
+  pairing_openrouter_api_key_set: boolean;
+  pairing_openrouter_model: string;
+  pairing_conversation_enabled: boolean;
+  pairing_conversation_interval_minutes: number;
+  pairing_target_messages: number;
+  pairing_max_messages_per_run: number;
+  pairing_sim_cooldown_minutes: number;
+  pairing_quiet_hours_enabled: boolean;
+  pairing_quiet_start_hour: number;
+  pairing_quiet_end_hour: number;
+  sms_autoreply_enabled: boolean;
+  sms_autoreply_template: string;
+  sms_autoreply_max_per_run: number;
+  sms_autoreply_lookback_minutes: number;
+  sms_autoreply_recipient_cooldown_hours: number;
 }
 export interface ConfigUpdate {
   llm_provider?: string;
@@ -98,6 +138,21 @@ export interface ConfigUpdate {
   google_sa_key?: string;
   drive_folder_id?: string;
   activity_cron?: string;
+  pairing_openrouter_api_key?: string;
+  pairing_openrouter_model?: string;
+  pairing_conversation_enabled?: boolean;
+  pairing_conversation_interval_minutes?: number;
+  pairing_target_messages?: number;
+  pairing_max_messages_per_run?: number;
+  pairing_sim_cooldown_minutes?: number;
+  pairing_quiet_hours_enabled?: boolean;
+  pairing_quiet_start_hour?: number;
+  pairing_quiet_end_hour?: number;
+  sms_autoreply_enabled?: boolean;
+  sms_autoreply_template?: string;
+  sms_autoreply_max_per_run?: number;
+  sms_autoreply_lookback_minutes?: number;
+  sms_autoreply_recipient_cooldown_hours?: number;
 }
 export interface McpServer {
   id: string;
@@ -131,6 +186,28 @@ export interface McpTestResult {
   tools: McpToolInfo[];
   error: string | null;
 }
+export interface SimPairingGroup {
+  id: string;
+  name: string;
+  enabled: boolean;
+  created_at: string;
+}
+export interface SimPairingGroupCreate {
+  name: string;
+}
+export interface SimPairingTopic { id: string; name: string; created_at: string; }
+export interface SimPairingTopicCreate { name: string; }
+export interface SimPair { id: string; sim_a_id: number; sim_b_id: number; sim_a_name: string; sim_b_name: string; country: string; group_a: string; group_b: string; topic: string; target_messages: number; sent_count: number; status: string; archived_reason: string | null; created_at: string; archived_at: string | null; }
+export interface SimPairHistory { id: string; pair_id: string; event: string; details: Record<string, unknown> | null; created_at: string; }
+export interface SimPairingRun { id: string; status: string; summary: Record<string, number> | null; error: string | null; started_at: string; completed_at: string | null; }
+export interface SimPairMessage { id: string; pair_id: string; from_sim_id: number; to_sim_id: number; content: string; provider: string; model: string; status: string; error: string | null; sent_at: string | null; created_at: string; }
+export interface SimPairMessageQueue { id: string; pair_id: string; status: string; due_at: string; attempts: number; last_error: string | null; sent_at: string | null; created_at: string; }
+export interface SimPairQueueStats { pending: number; overdue: number; failed: number; pairs_under_target: number; }
+export interface SimPairConversationRun { sent: number; skipped: number; failed: number; held?: number; active_pairs?: number; queued?: number; overdue?: number; pairs_under_target?: number; reason?: string; previews?: { pair_id: string; from_sim_id: number; to_sim_id: number; content: string }[]; }
+export interface SmsReply { id: string; trigger_kind: string; trigger_ref: string; sim_id: number; to_number: string; whatsapp_number: string | null; content: string; status: string; error: string | null; sent_at: string | null; created_at: string; }
+export interface SmsAutoReplyStats { sent: number; failed: number; skipped: number; sending: number; last_sent_at: string | null; }
+export interface SmsAutoReplyPreview { kind: string; to_number: string; whatsapp: string | null; content: string | null; skip_reason: string | null; }
+export interface SmsAutoReplyRun { sent: number; skipped: number; failed: number; reason?: string; previews?: SmsAutoReplyPreview[]; }
 export interface Prompt {
   id: string;
   name: string;
