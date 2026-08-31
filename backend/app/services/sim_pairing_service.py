@@ -108,8 +108,17 @@ class SimPairingService:
                     used.add(frozenset((a_id, b_id))); counts[a_id] += 1; counts[b_id] += 1; created += 1
             return await SimPairingService._finish(session, run, {"created": created, "archived": archived, "eligible": len(eligible), "names_assigned": names_assigned, "pairs_named": pairs_named})
         except Exception as exc:
-            run.status, run.error, run.completed_at = "failed", str(exc), datetime.now(timezone.utc)
-            await session.commit()
+            # A flush failure leaves the session unusable until it is rolled
+            # back; without this, the commit below raises PendingRollbackError
+            # and the run is left stuck at "running" forever.
+            await session.rollback()
+            try:
+                run.status, run.error, run.completed_at = "failed", str(exc), datetime.now(timezone.utc)
+                await session.commit()
+            except Exception:
+                # Never let a failure in recording the failure mask the
+                # original exception.
+                await session.rollback()
             raise
 
     @staticmethod
@@ -127,7 +136,11 @@ class SimPairingService:
             select(SimPairingSim).where(SimPairingSim.sim_id.in_(sim_ids))
         )).scalars())
         by_id = {record.sim_id: record for record in records}
-        used_names = {record.display_name for record in records}
+        # display_name is unique across the whole table, not just this eligible
+        # subset, so the pool of taken names must come from every row. Otherwise
+        # a name already held by a now-ineligible SIM looks free and gets handed
+        # to a new SIM, and the commit dies on the unique constraint.
+        used_names = set((await session.execute(select(SimPairingSim.display_name))).scalars())
         assigned = 0
         for sim_id in sim_ids:
             record = by_id.get(sim_id)
