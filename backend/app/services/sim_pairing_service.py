@@ -20,6 +20,12 @@ from app.services.mcp_service import _build_http_transport
 class SimPairingService:
     """Synchronize deterministic SIM pairs; this service never sends SMS."""
 
+    # A SIM in one of these states needs a manual TmLite intervention (or is
+    # simply gone) before it can be part of a pair again, so an existing pair
+    # is archived. Everything else — BUSY, RINGING, etc. — is a SIM merely
+    # mid-call at sync time and must never cost a pair its history.
+    DURABLE_BAD_STATES = {"OFFLINE", "DISABLED", "BLOCKED"}
+
     # These are local labels for the pairing application. They never rename a
     # SIM in TmLite, so carrier-facing configuration stays untouched.
     WEST_AFRICAN_NAMES = (
@@ -54,19 +60,32 @@ class SimPairingService:
                     sims.extend(page)
                     if len(page) < 100:
                         break
-            eligible = {
-                sim["id"]: {"country": countries_by_id.get(sim.get("gateway_id")) or countries_by_name.get(str(sim.get("gateway_name") or "").upper(), ""), "group": str(sim.get("sim_group_name") or "")}
+            # Group and country membership is a static property of the SIM,
+            # independent of its transient carrier state, so it is computed
+            # once and then split two ways by state.
+            candidates = {
+                sim["id"]: {"state": sim.get("state"), "country": countries_by_id.get(sim.get("gateway_id")) or countries_by_name.get(str(sim.get("gateway_name") or "").upper(), ""), "group": str(sim.get("sim_group_name") or "")}
                 for sim in sims
-                if sim.get("id") is not None and sim.get("state") not in {"OFFLINE", "DISABLED"}
+                if sim.get("id") is not None
                 and str(sim.get("sim_group_name") or "").lower() in group_names
                 and (countries_by_id.get(sim.get("gateway_id")) or countries_by_name.get(str(sim.get("gateway_name") or "").upper(), ""))
             }
-            names, names_assigned = await SimPairingService._ensure_sim_names(session, eligible)
+            # "Keep this pair alive?" asks whether the SIM is durably gone.
+            # BUSY/RINGING/etc. are transient call states that must never
+            # cost a pair its history and sent_count.
+            kept_alive = {sim_id: info for sim_id, info in candidates.items() if info["state"] not in SimPairingService.DURABLE_BAD_STATES}
+            # "Create a new pair with this SIM?" asks whether it can actually
+            # send right now, matching the conversation service's own IDLE
+            # guard exactly, so a pair is never created only to sit stuck.
+            creatable = {sim_id: info for sim_id, info in candidates.items() if info["state"] == "IDLE"}
+            # Names are maintained for the broader kept-alive set so a pair
+            # whose SIM is momentarily busy still has its name refreshed.
+            names, names_assigned = await SimPairingService._ensure_sim_names(session, kept_alive)
             active_pairs = list((await session.execute(select(SimPair).where(SimPair.status == "active"))).scalars())
             archived = 0
             pairs_named = 0
             for pair in active_pairs:
-                a, b = eligible.get(pair.sim_a_id), eligible.get(pair.sim_b_id)
+                a, b = kept_alive.get(pair.sim_a_id), kept_alive.get(pair.sim_b_id)
                 if not a or not b or a["country"] != b["country"]:
                     pair.status, pair.archived_reason, pair.archived_at = "archived", "SIM unavailable or no longer eligible", datetime.now(timezone.utc)
                     session.add(SimPairHistory(pair_id=pair.id, event="archived", details={"reason": pair.archived_reason}))
@@ -77,17 +96,17 @@ class SimPairingService:
             await session.flush()
             active_pairs = [p for p in active_pairs if p.status == "active"]
             used = {frozenset((p.sim_a_id, p.sim_b_id)) for p in active_pairs}
-            counts = {sim_id: 0 for sim_id in eligible}
+            counts = {sim_id: 0 for sim_id in creatable}
             for pair in active_pairs:
                 counts[pair.sim_a_id] = counts.get(pair.sim_a_id, 0) + 1
                 counts[pair.sim_b_id] = counts.get(pair.sim_b_id, 0) + 1
             created = 0
-            ids = sorted(eligible)
+            ids = sorted(creatable)
             for index, a_id in enumerate(ids):
                 for b_id in ids[index + 1:]:
                     if counts[a_id] >= 3 or counts[b_id] >= 3 or frozenset((a_id, b_id)) in used:
                         continue
-                    a, b = eligible[a_id], eligible[b_id]
+                    a, b = creatable[a_id], creatable[b_id]
                     if a["country"] != b["country"]:
                         continue
                     topic = topics[created % len(topics)]
@@ -106,7 +125,12 @@ class SimPairingService:
                     await session.flush()
                     session.add(SimPairHistory(pair_id=pair.id, event="created", details={"country": pair.country, "topic": topic, "sim_a_name": pair.sim_a_name, "sim_b_name": pair.sim_b_name, "target_messages": target_messages}))
                     used.add(frozenset((a_id, b_id))); counts[a_id] += 1; counts[b_id] += 1; created += 1
-            return await SimPairingService._finish(session, run, {"created": created, "archived": archived, "eligible": len(eligible), "names_assigned": names_assigned, "pairs_named": pairs_named})
+            # "eligible" now reports the creatable set: the number that
+            # actually gates whether new pairs get made, so an operator
+            # wondering why "created" is low or zero can act on this number
+            # directly. "kept_alive" is reported alongside it since it is the
+            # (larger) set that decides which existing pairs survive.
+            return await SimPairingService._finish(session, run, {"created": created, "archived": archived, "eligible": len(creatable), "kept_alive": len(kept_alive), "names_assigned": names_assigned, "pairs_named": pairs_named})
         except Exception as exc:
             # A flush failure leaves the session unusable until it is rolled
             # back; without this, the commit below raises PendingRollbackError
