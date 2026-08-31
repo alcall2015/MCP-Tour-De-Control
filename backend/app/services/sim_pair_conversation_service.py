@@ -239,7 +239,15 @@ class SimPairConversationService:
         query = (
             select(SimPairMessageQueue, SimPair)
             .join(SimPair, SimPair.id == SimPairMessageQueue.pair_id)
-            .where(SimPairMessageQueue.status == "pending", SimPairMessageQueue.due_at <= now)
+            .where(
+                SimPairMessageQueue.status == "pending",
+                SimPairMessageQueue.due_at <= now,
+                # A pair archived after its queue row was created must never
+                # send: sync() creates fresh pairs for the same SIM once it is
+                # eligible again, and this dead row would otherwise converse
+                # on the SIM's behalf at the same time as the new pair.
+                SimPair.status == "active",
+            )
         )
         if country:
             query = query.where(SimPair.country == country.upper())

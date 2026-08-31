@@ -8,7 +8,9 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from app.models import McpServer, SimPair, SimPairingGroup, SimPairingRun, SimPairingSim, SimPairingTopic
+from datetime import datetime, timedelta, timezone
+
+from app.models import McpServer, SimPair, SimPairingGroup, SimPairingRun, SimPairingSim, SimPairingTopic, SimPairMessageQueue
 from app.services.sim_pairing_service import SimPairingService
 
 MODULE = "app.services.sim_pairing_service"
@@ -173,6 +175,52 @@ async def test_a_blocked_sim_has_its_pairs_archived_and_gets_no_new_pair(session
     new_pairs = list((await session.execute(select(SimPair).where(SimPair.id != pair.id))).scalars())
     for new_pair in new_pairs:
         assert 1 not in (new_pair.sim_a_id, new_pair.sim_b_id)
+
+
+async def test_archiving_a_pair_during_sync_cancels_its_pending_queue_rows(session):
+    """A pair archived in this very run must not leave a live queue row
+    behind: the row was written for a pair that no longer exists as active."""
+    await _seed_pairing_config(session)
+    pair = SimPair(sim_a_id=1, sim_b_id=2, sim_a_name="Aïssata", sim_b_name="Aminata", country="CI", group_a="love", group_b="love", topic="love", target_messages=10)
+    session.add(pair)
+    await session.commit()
+    session.add(SimPairMessageQueue(pair_id=pair.id, due_at=datetime.now(timezone.utc) - timedelta(minutes=5)))
+    await session.commit()
+
+    sims = [_sim(1, "BLOCKED"), _sim(2, "IDLE"), _sim(3, "IDLE")]
+    with patch(f"{MODULE}.Client", lambda transport: _FleetMcpClient(sims)):
+        run = await SimPairingService.sync(session)
+
+    assert run.summary["archived"] == 1
+    queue = (await session.execute(
+        select(SimPairMessageQueue).where(SimPairMessageQueue.pair_id == pair.id)
+    )).scalar_one()
+    assert queue.status == "cancelled"
+
+
+async def test_sync_cancels_a_pending_queue_row_of_a_pair_archived_earlier(session):
+    """A pair archived in a previous run must self-heal on the next sync,
+    not require a one-off script to clean up its leftover queue row."""
+    await _seed_pairing_config(session)
+    pair = SimPair(
+        sim_a_id=1, sim_b_id=2, sim_a_name="Aïssata", sim_b_name="Aminata", country="CI",
+        group_a="love", group_b="love", topic="love", target_messages=10,
+        status="archived", archived_reason="SIM unavailable or no longer eligible",
+        archived_at=datetime.now(timezone.utc),
+    )
+    session.add(pair)
+    await session.commit()
+    session.add(SimPairMessageQueue(pair_id=pair.id, due_at=datetime.now(timezone.utc) - timedelta(minutes=5)))
+    await session.commit()
+
+    sims = [_sim(3, "IDLE"), _sim(4, "IDLE")]
+    with patch(f"{MODULE}.Client", lambda transport: _FleetMcpClient(sims)):
+        await SimPairingService.sync(session)
+
+    queue = (await session.execute(
+        select(SimPairMessageQueue).where(SimPairMessageQueue.pair_id == pair.id)
+    )).scalar_one()
+    assert queue.status == "cancelled"
 
 
 async def test_two_idle_sims_still_get_paired(session):

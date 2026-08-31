@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from fastmcp import Client
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.models import (
     Config,
@@ -13,6 +13,7 @@ from app.models import (
     SimPairingRun,
     SimPairingSim,
     SimPairingTopic,
+    SimPairMessageQueue,
 )
 from app.services.mcp_service import _build_http_transport
 
@@ -94,6 +95,18 @@ class SimPairingService:
                     pair.sim_a_name, pair.sim_b_name = names[pair.sim_a_id], names[pair.sim_b_id]
                     pairs_named += 1
             await session.flush()
+            # Bounded, single-statement self-heal: cancel every pending queue
+            # row still attached to an archived pair, whether it was archived
+            # just above or in an earlier run. This is what keeps dead rows
+            # from padding queue_stats and from ever becoming sendable again.
+            await session.execute(
+                update(SimPairMessageQueue)
+                .where(
+                    SimPairMessageQueue.status == "pending",
+                    SimPairMessageQueue.pair_id.in_(select(SimPair.id).where(SimPair.status == "archived")),
+                )
+                .values(status="cancelled")
+            )
             active_pairs = [p for p in active_pairs if p.status == "active"]
             used = {frozenset((p.sim_a_id, p.sim_b_id)) for p in active_pairs}
             counts = {sim_id: 0 for sim_id in creatable}

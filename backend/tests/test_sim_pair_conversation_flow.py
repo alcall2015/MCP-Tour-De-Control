@@ -268,3 +268,37 @@ async def test_an_invalid_generation_is_recorded_and_retried(session):
     assert item.status == "pending" and item.attempts == 1
     await session.refresh(pair)
     assert pair.sent_count == 0
+
+
+async def test_an_archived_pairs_due_queue_row_is_not_sent(session):
+    """Both SIMs are IDLE and the row is due, so nothing but the archived
+    status of the pair stops it from being sent. This isolates the guard
+    from the ordinary IDLE check, which would otherwise mask a regression."""
+    await _configure(session)
+    active_pair = await _pair(session, a=1, b=2)
+    # Give the active pair a recent sent message so _enqueue_pairs schedules
+    # its next turn in the future rather than immediately, keeping the run's
+    # only due candidate the archived pair below.
+    session.add(SimPairMessage(
+        pair_id=active_pair.id, from_sim_id=1, to_sim_id=2, content="hi",
+        provider="openrouter", model="m", status="sent", sent_at=datetime.now(timezone.utc),
+    ))
+    await session.commit()
+
+    archived_pair = await _pair(session, a=3, b=4)
+    archived_pair.status = "archived"
+    await session.commit()
+    session.add(SimPairMessageQueue(
+        pair_id=archived_pair.id, due_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+    ))
+    await session.commit()
+
+    with _tmlite([_sim(1), _sim(2), _sim(3), _sim(4)]) as sent_sms:
+        result = await Service.run_due(session)
+
+    assert result["sent"] == 0
+    assert sent_sms == []
+    queue = (await session.execute(
+        select(SimPairMessageQueue).where(SimPairMessageQueue.pair_id == archived_pair.id)
+    )).scalar_one()
+    assert queue.status == "pending"
