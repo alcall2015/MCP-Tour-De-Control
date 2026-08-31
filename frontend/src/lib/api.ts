@@ -39,7 +39,15 @@ export const listSimPairingTopics = () => request<SimPairingTopic[]>("/sim-pairi
 export const createSimPairingTopic = (data: SimPairingTopicCreate) =>
   request<SimPairingTopic>("/sim-pairing/topics", { method: "POST", body: JSON.stringify(data) });
 export const deleteSimPairingTopic = (id: string) => request<void>(`/sim-pairing/topics/${id}`, { method: "DELETE" });
-export const listSimPairs = () => request<SimPair[]>("/sim-pairing/pairs");
+export const listSimPairs = (params?: { status?: "active" | "archived"; limit?: number; offset?: number }) => {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
+  const qs = query.toString();
+  return request<SimPair[]>(`/sim-pairing/pairs${qs ? `?${qs}` : ""}`);
+};
+export const getSimPairsCount = () => request<SimPairCount>("/sim-pairing/pairs/count");
 export const listSimPairHistory = (id: string) => request<SimPairHistory[]>(`/sim-pairing/pairs/${id}/history`);
 export const listSimPairMessages = (id: string) => request<SimPairMessage[]>(`/sim-pairing/pairs/${id}/messages`);
 export const listSimPairMessageQueue = () => request<SimPairMessageQueue[]>("/sim-pairing/queue");
@@ -203,6 +211,7 @@ export interface SimPairingRun { id: string; status: string; summary: Record<str
 export interface SimPairMessage { id: string; pair_id: string; from_sim_id: number; to_sim_id: number; content: string; provider: string; model: string; status: string; error: string | null; sent_at: string | null; created_at: string; }
 export interface SimPairMessageQueue { id: string; pair_id: string; status: string; due_at: string; attempts: number; last_error: string | null; sent_at: string | null; created_at: string; }
 export interface SimPairQueueStats { pending: number; overdue: number; failed: number; pairs_under_target: number; }
+export interface SimPairCount { active: number; archived: number; }
 export interface SimPairConversationRun { sent: number; skipped: number; failed: number; held?: number; active_pairs?: number; queued?: number; overdue?: number; pairs_under_target?: number; reason?: string; previews?: { pair_id: string; from_sim_id: number; to_sim_id: number; content: string }[]; }
 export interface SmsReply { id: string; trigger_kind: string; trigger_ref: string; sim_id: number; to_number: string; whatsapp_number: string | null; content: string; status: string; error: string | null; sent_at: string | null; created_at: string; }
 export interface SmsAutoReplyStats { sent: number; failed: number; skipped: number; sending: number; last_sent_at: string | null; }

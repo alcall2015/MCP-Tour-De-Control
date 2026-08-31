@@ -49,6 +49,11 @@ class SimPairRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SimPairCountRead(BaseModel):
+    active: int
+    archived: int
+
+
 class SimPairQueueStats(BaseModel):
     pending: int
     overdue: int

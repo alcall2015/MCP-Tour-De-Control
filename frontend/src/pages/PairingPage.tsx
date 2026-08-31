@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createSimPairingGroup, createSimPairingTopic, deleteSimPairingGroup, deleteSimPairingTopic, getConfig, getSimPairQueueStats, listSimPairHistory, listSimPairingGroups, listSimPairingTopics, listSimPairMessageQueue, listSimPairMessages, listSimPairs, previewSimPairConversation, runSimPairConversations, syncSimPairs, updateConfig } from "../lib/api";
+import { createSimPairingGroup, createSimPairingTopic, deleteSimPairingGroup, deleteSimPairingTopic, getConfig, getSimPairQueueStats, getSimPairsCount, listSimPairHistory, listSimPairingGroups, listSimPairingTopics, listSimPairMessageQueue, listSimPairMessages, listSimPairs, previewSimPairConversation, runSimPairConversations, syncSimPairs, updateConfig } from "../lib/api";
 import { Spinner } from "../components/ui/Spinner";
+
+const PAIRS_PAGE_SIZE = 25;
 
 export function PairingPage() {
   const queryClient = useQueryClient();
@@ -9,6 +11,8 @@ export function PairingPage() {
   const [topicName, setTopicName] = useState("");
   const [historyPairId, setHistoryPairId] = useState<string | null>(null);
   const [messagesPairId, setMessagesPairId] = useState<string | null>(null);
+  const [pairsStatus, setPairsStatus] = useState<"active" | "archived">("active");
+  const [pairsPage, setPairsPage] = useState(0);
   const [openRouterKey, setOpenRouterKey] = useState("");
   const [openRouterModel, setOpenRouterModel] = useState<string | null>(null);
   const [conversationInterval, setConversationInterval] = useState<number | null>(null);
@@ -24,7 +28,12 @@ export function PairingPage() {
     queryFn: listSimPairingGroups,
   });
   const { data: topics = [] } = useQuery({ queryKey: ["sim-pairing-topics"], queryFn: listSimPairingTopics });
-  const { data: pairs = [] } = useQuery({ queryKey: ["sim-pairs"], queryFn: listSimPairs, refetchInterval: 30000 });
+  const { data: pairsCount } = useQuery({ queryKey: ["sim-pairs-count"], queryFn: getSimPairsCount, refetchInterval: 30000 });
+  const { data: pairs = [] } = useQuery({
+    queryKey: ["sim-pairs", pairsStatus, pairsPage],
+    queryFn: () => listSimPairs({ status: pairsStatus, limit: PAIRS_PAGE_SIZE, offset: pairsPage * PAIRS_PAGE_SIZE }),
+    refetchInterval: 30000,
+  });
   const { data: history = [] } = useQuery({ queryKey: ["sim-pair-history", historyPairId], queryFn: () => listSimPairHistory(historyPairId!), enabled: Boolean(historyPairId) });
   const { data: messages = [] } = useQuery({ queryKey: ["sim-pair-messages", messagesPairId], queryFn: () => listSimPairMessages(messagesPairId!), enabled: Boolean(messagesPairId), refetchInterval: 30000 });
   const { data: queue = [] } = useQuery({ queryKey: ["sim-pair-message-queue"], queryFn: listSimPairMessageQueue, refetchInterval: 30000 });
@@ -45,7 +54,10 @@ export function PairingPage() {
   });
   const syncMut = useMutation({
     mutationFn: syncSimPairs,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sim-pairs"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sim-pairs"] });
+      queryClient.invalidateQueries({ queryKey: ["sim-pairs-count"] });
+    },
   });
   const conversationMut = useMutation({
     mutationFn: runSimPairConversations,
@@ -53,6 +65,7 @@ export function PairingPage() {
       queryClient.invalidateQueries({ queryKey: ["sim-pair-messages"] });
       queryClient.invalidateQueries({ queryKey: ["sim-pair-history"] });
       queryClient.invalidateQueries({ queryKey: ["sim-pairs"] });
+      queryClient.invalidateQueries({ queryKey: ["sim-pairs-count"] });
       queryClient.invalidateQueries({ queryKey: ["sim-pair-message-queue"] });
       queryClient.invalidateQueries({ queryKey: ["sim-pair-queue-stats"] });
     },
@@ -77,6 +90,15 @@ export function PairingPage() {
   const sendingHours = activeQuietEnabled ? 24 - ((activeQuietEnd - activeQuietStart + 24) % 24) : 24;
   const dailyCapacity = activeMaxPerRun * 4 * sendingHours;
   const pairsSupported = Math.floor(dailyCapacity / (1440 / activeInterval));
+  const togglePairsStatus = () => {
+    setPairsStatus((current) => (current === "active" ? "archived" : "active"));
+    setPairsPage(0);
+  };
+  const pairsTotal = pairsCount ? pairsCount[pairsStatus] : 0;
+  const pairsRangeStart = pairsTotal === 0 ? 0 : pairsPage * PAIRS_PAGE_SIZE + 1;
+  const pairsRangeEnd = Math.min(pairsTotal, (pairsPage + 1) * PAIRS_PAGE_SIZE);
+  const canGoPrevPairs = pairsPage > 0;
+  const canGoNextPairs = pairsRangeEnd < pairsTotal;
 
   return (
     <div className="space-y-6">
@@ -144,14 +166,42 @@ export function PairingPage() {
         <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>Pairs and history</h3>
         <div className="mt-1 flex items-center justify-between gap-4">
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>Each eligible SIM receives a permanent local West African first name. The scheduler checks pairs every 15 minutes; syncing only creates or updates records and never sends SMS.</p>
-          <button type="button" className="btn-secondary whitespace-nowrap" onClick={() => syncMut.mutate()} disabled={syncMut.isPending}>
-            {syncMut.isPending ? "Syncing..." : "Sync now"}
-          </button>
+          <div className="flex gap-3">
+            <button type="button" className="btn-secondary whitespace-nowrap" onClick={togglePairsStatus}>
+              {pairsStatus === "active" ? `Show archived (${pairsCount?.archived ?? 0})` : `Show active (${pairsCount?.active ?? 0})`}
+            </button>
+            <button type="button" className="btn-secondary whitespace-nowrap" onClick={() => syncMut.mutate()} disabled={syncMut.isPending}>
+              {syncMut.isPending ? "Syncing..." : "Sync now"}
+            </button>
+          </div>
         </div>
         {syncMut.error && <p className="mt-3 text-sm" style={{ color: "var(--error)" }}>{syncMut.error.message}</p>}
         <div className="mt-5 space-y-2">
-          {pairs.length === 0 ? <p className="text-sm" style={{ color: "var(--text-muted)" }}>No pairs have been created yet.</p> : pairs.map((pair) => <div key={pair.id} className="card-elevated px-4 py-3"><div className="flex items-center justify-between"><div><span className="font-medium" style={{ color: "var(--text-primary)" }}>{pair.sim_a_name || `SIM ${pair.sim_a_id}`} ↔ {pair.sim_b_name || `SIM ${pair.sim_b_id}`}</span><span className="ml-2 text-xs" style={{ color: "var(--text-secondary)" }}>{pair.country} · {pair.topic}</span><span className="ml-2 text-xs font-medium" style={{ color: pair.sent_count >= pair.target_messages ? "var(--success)" : "var(--text-muted)" }}>{pair.sent_count}/{pair.target_messages}</span></div><div className="flex gap-3"><button onClick={() => setMessagesPairId(pair.id)} className="text-xs" style={{ color: "var(--accent)" }}>Messages</button><button onClick={() => setHistoryPairId(pair.id)} className="text-xs" style={{ color: "var(--running)" }}>History</button></div></div><p className="mt-1 text-xs" style={{ color: "var(--text-secondary)" }}>SIM {pair.sim_a_id} ↔ SIM {pair.sim_b_id}</p><p className="mt-1 text-xs" style={{ color: pair.status === "active" ? "var(--success)" : "var(--text-muted)" }}>{pair.status}{pair.archived_reason ? ` — ${pair.archived_reason}` : ""}</p></div>)}
+          {pairs.length === 0 ? <p className="text-sm" style={{ color: "var(--text-muted)" }}>No {pairsStatus} pairs.</p> : pairs.map((pair) => <div key={pair.id} className="card-elevated px-4 py-3"><div className="flex items-center justify-between"><div><span className="font-medium" style={{ color: "var(--text-primary)" }}>{pair.sim_a_name || `SIM ${pair.sim_a_id}`} ↔ {pair.sim_b_name || `SIM ${pair.sim_b_id}`}</span><span className="ml-2 text-xs" style={{ color: "var(--text-secondary)" }}>{pair.country} · {pair.topic}</span><span className="ml-2 text-xs font-medium" style={{ color: pair.sent_count >= pair.target_messages ? "var(--success)" : "var(--text-muted)" }}>{pair.sent_count}/{pair.target_messages}</span></div><div className="flex gap-3"><button onClick={() => setMessagesPairId(pair.id)} className="text-xs" style={{ color: "var(--accent)" }}>Messages</button><button onClick={() => setHistoryPairId(pair.id)} className="text-xs" style={{ color: "var(--running)" }}>History</button></div></div><p className="mt-1 text-xs" style={{ color: "var(--text-secondary)" }}>SIM {pair.sim_a_id} ↔ SIM {pair.sim_b_id}</p><p className="mt-1 text-xs" style={{ color: pair.status === "active" ? "var(--success)" : "var(--text-muted)" }}>{pair.status}{pair.archived_reason ? ` — ${pair.archived_reason}` : ""}</p></div>)}
         </div>
+        {pairsTotal > 0 && (
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>{pairsRangeStart}–{pairsRangeEnd} of {pairsTotal}</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setPairsPage((page) => Math.max(0, page - 1))}
+                disabled={!canGoPrevPairs}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setPairsPage((page) => page + 1)}
+                disabled={!canGoNextPairs}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
         {historyPairId && <div className="mt-5 rounded-lg p-4" style={{ backgroundColor: "var(--bg-panel)" }}><div className="flex justify-between"><span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Pair history</span><button onClick={() => setHistoryPairId(null)} className="text-xs" style={{ color: "var(--text-secondary)" }}>Close</button></div>{history.map((event) => <p key={event.id} className="mt-2 text-xs" style={{ color: "var(--text-secondary)" }}>{new Date(event.created_at).toLocaleString()} — {event.event}</p>)}</div>}
         {messagesPairId && <div className="mt-5 rounded-lg p-4" style={{ backgroundColor: "var(--bg-panel)" }}><div className="flex justify-between"><span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>SMS conversation</span><button onClick={() => setMessagesPairId(null)} className="text-xs" style={{ color: "var(--text-secondary)" }}>Close</button></div>{messages.length === 0 ? <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>No messages yet.</p> : messages.map((message) => <div key={message.id} className="mt-3 rounded-lg p-3 text-sm" style={{ backgroundColor: "var(--bg-card)" }}><p style={{ color: "var(--text-primary)" }}>{message.content || "Message generation failed"}</p><p className="mt-1 text-xs" style={{ color: message.status === "sent" ? "var(--success)" : "var(--error)" }}>SIM {message.from_sim_id} → SIM {message.to_sim_id} · {message.status} · {new Date(message.created_at).toLocaleString()}</p>{message.error && <p className="mt-1 text-xs" style={{ color: "var(--error)" }}>{message.error}</p>}</div>)}</div>}
       </div>

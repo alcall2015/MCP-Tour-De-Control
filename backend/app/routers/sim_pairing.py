@@ -1,13 +1,14 @@
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models import SimPair, SimPairHistory, SimPairMessage, SimPairMessageQueue, SimPairingGroup, SimPairingRun, SimPairingTopic
-from app.schemas.sim_pairing import SimPairHistoryRead, SimPairMessageQueueRead, SimPairMessageRead, SimPairQueueStats, SimPairRead, SimPairingGroupCreate, SimPairingGroupRead, SimPairingTopicCreate, SimPairingTopicRead
+from app.schemas.sim_pairing import SimPairCountRead, SimPairHistoryRead, SimPairMessageQueueRead, SimPairMessageRead, SimPairQueueStats, SimPairRead, SimPairingGroupCreate, SimPairingGroupRead, SimPairingTopicCreate, SimPairingTopicRead
 from app.services.sim_pair_conversation_service import SimPairConversationService
 from app.services.sim_pairing_service import SimPairingService
 
@@ -69,9 +70,30 @@ async def delete_topic(topic_id: uuid.UUID, session: AsyncSession = Depends(get_
     await session.commit()
 
 
+@router.get("/pairs/count", response_model=SimPairCountRead)
+async def pairs_count(session: AsyncSession = Depends(get_async_session)):
+    """Counts for both statuses, so the UI can label the archived toggle and size pagination without fetching rows it will not display."""
+    active = (
+        await session.execute(select(func.count()).select_from(SimPair).where(SimPair.status == "active"))
+    ).scalar_one()
+    archived = (
+        await session.execute(select(func.count()).select_from(SimPair).where(SimPair.status == "archived"))
+    ).scalar_one()
+    return SimPairCountRead(active=active, archived=archived)
+
+
 @router.get("/pairs", response_model=list[SimPairRead])
-async def list_pairs(session: AsyncSession = Depends(get_async_session)):
-    return list((await session.execute(select(SimPair).order_by(SimPair.created_at.desc()))).scalars())
+async def list_pairs(
+    status: Literal["active", "archived"] | None = None,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_async_session),
+):
+    query = select(SimPair).order_by(SimPair.created_at.desc())
+    if status is not None:
+        query = query.where(SimPair.status == status)
+    query = query.limit(limit).offset(offset)
+    return list((await session.execute(query)).scalars())
 
 
 @router.get("/pairs/{pair_id}/history", response_model=list[SimPairHistoryRead])
