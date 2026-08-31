@@ -1,6 +1,6 @@
 from app.services.sms_auto_reply_rules import (
-    drop_recent_recipients, fleet_numbers, is_fleet_number, missed_call_trigger,
-    render, sms_triggers, whatsapp_for,
+    drop_recent_recipients, fleet_numbers, is_fleet_number, is_messageable_destination,
+    missed_call_trigger, render, sms_triggers, whatsapp_for,
 )
 
 FLEET = fleet_numbers([{"phone_number": "0748524199"}, {"phone_number": "0705435020"}])
@@ -100,6 +100,58 @@ def test_a_recipient_messaged_recently_is_dropped():
 
 def test_the_template_is_rendered_verbatim():
     assert render("Ecris-moi au {whatsapp}.", "33600000002") == "Ecris-moi au 33600000002."
+
+
+def test_is_messageable_destination_rejects_carrier_traffic():
+    # Alphanumeric sender ID (a promo) and a short code (a balance notice):
+    # neither is a person who can be messaged back.
+    assert not is_messageable_destination("PASS_1GB")
+    assert not is_messageable_destination("8117")
+
+
+def test_is_messageable_destination_accepts_every_real_format():
+    for number in ("+2250700007076", "+224610401035", "+2250714433777",
+                   "0748524199", "629040718"):
+        assert is_messageable_destination(number), number
+
+
+def test_carrier_noise_never_becomes_an_sms_trigger():
+    for sender in ("PASS_1GB", "8117"):
+        messages = [{"ref": f"sms:{sender}", "sim_id": 872, "from_number": sender,
+                     "text": "?", "at": "x"}]
+        assert sms_triggers(messages, FLEET, []) == []
+
+
+def test_real_sms_senders_in_every_format_become_triggers():
+    # An empty fleet, deliberately: this is testing the destination
+    # predicate, not fleet exclusion (which 0748524199 would otherwise hit,
+    # since it is one of FLEET's own numbers).
+    for number in ("+2250700007076", "+224610401035", "+2250714433777",
+                   "0748524199", "629040718"):
+        messages = [{"ref": f"sms:{number}", "sim_id": 872, "from_number": number,
+                     "text": "?", "at": "x"}]
+        refs = [t["ref"] for t in sms_triggers(messages, set(), [])]
+        assert refs == [f"sms:{number}"], number
+
+
+def test_carrier_noise_never_becomes_a_missed_call_trigger():
+    for callee in ("PASS_1GB", "8117"):
+        calls = [_call("33600000001", callee, "2026-08-28T10:00:00")]
+        assert missed_call_trigger(calls, FLEET, INDEX) is None
+
+
+def test_real_missed_call_callees_in_every_format_become_triggers():
+    # An empty fleet for the same reason as the SMS-sender version above.
+    for number in ("+2250700007076", "+224610401035", "+2250714433777",
+                   "0748524199", "629040718"):
+        calls = [_call("33600000001", number, "2026-08-28T10:00:00")]
+        trigger = missed_call_trigger(calls, set(), INDEX)
+        assert trigger is not None and trigger["to_number"] == number, number
+
+
+def test_a_missed_call_to_a_short_code_is_never_followed_up():
+    calls = [_call("33600000001", "8117", "2026-08-28T10:00:00")]
+    assert missed_call_trigger(calls, FLEET, INDEX) is None
 
 
 def test_one_person_in_two_formats_gets_one_message_in_a_single_run():

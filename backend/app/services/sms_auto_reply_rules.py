@@ -31,6 +31,29 @@ def same_number(a, b) -> bool:
     return da.endswith(db) or db.endswith(da)
 
 
+# Floor for whether a value is a plausible mobile destination at all -- a
+# different question from same_number()'s "are these two values the same
+# subscriber", which is what MIN_MATCH_DIGITS governs; the two floors may
+# need to move independently, so they are kept as separate constants. Guinea
+# national numbers are 9 digits and Ivory Coast national numbers are 10, so 8
+# is a safety margin below the shortest legitimate case: it never rejects a
+# real number, while rejecting carrier short codes (3-6 digits).
+MIN_DESTINATION_DIGITS = 8
+
+
+def is_messageable_destination(value) -> bool:
+    """True if a value could plausibly be a real person's mobile number,
+    rather than carrier/system traffic that cannot be messaged back. Both
+    conditions are required: an alphanumeric sender ID (e.g. "PASS_1GB", a
+    promo) fails the no-alphabetic-characters check, and a short code (e.g.
+    "8117", a balance notice) fails the digit-count check. A real number
+    never contains letters, in any format the API returns it."""
+    text = str(value or "")
+    if any(ch.isalpha() for ch in text):
+        return False
+    return len(digits(text)) >= MIN_DESTINATION_DIGITS
+
+
 def fleet_numbers(sims: list[dict]) -> set[str]:
     return {digits(s.get("phone_number")) for s in sims if digits(s.get("phone_number"))}
 
@@ -49,6 +72,8 @@ def whatsapp_for(target_number: str, calls: list[dict]) -> str | None:
 def sms_triggers(messages: list[dict], fleet: set[str], calls: list[dict]) -> list[dict]:
     triggers = []
     for message in messages:
+        if not is_messageable_destination(message["from_number"]):
+            continue
         if is_fleet_number(message["from_number"], fleet):
             continue
         triggers.append({
@@ -68,6 +93,7 @@ def missed_call_trigger(calls: list[dict], fleet: set[str],
         if c.get("status") in UNANSWERED_STATUSES
         and not (c.get("duration") or 0)
         and c.get("callee")
+        and is_messageable_destination(c["callee"])
         and not is_fleet_number(c["callee"], fleet)
     ]
     if not candidates:
