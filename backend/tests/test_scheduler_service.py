@@ -142,3 +142,39 @@ async def test_add_job_replace_existing():
     assert job is not None
 
     service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_the_three_tmlite_jobs_do_not_fire_on_the_same_tick():
+    # The scheduler must be started before get_job() can see the jobs: until
+    # then APScheduler holds them as pending and get_job() returns None.
+    # Their start dates are minutes out, so none of them actually fires here.
+    service = SchedulerService(use_db_jobstore=False)
+    service.start()
+    try:
+        service.set_pairing_job()
+        service.set_pair_conversation_job()
+        service.set_sms_auto_reply_job()
+
+        starts = {
+            job_id: service.scheduler.get_job(job_id).trigger.start_date
+            for job_id in (
+                SchedulerService.PAIRING_JOB_ID,
+                SchedulerService.PAIR_CONVERSATION_JOB_ID,
+                SchedulerService.SMS_AUTO_REPLY_JOB_ID,
+            )
+        }
+    finally:
+        service.shutdown()
+
+    assert len(set(starts.values())) == 3, "two jobs share a start time"
+
+    ordered = sorted(starts.values())
+    gaps = [(b - a).total_seconds() / 60 for a, b in zip(ordered, ordered[1:])]
+    assert all(gap >= 4 for gap in gaps), f"jobs are less than 4 minutes apart: {gaps}"
+
+
+def test_every_offset_stays_inside_one_cycle():
+    # An offset at or beyond the interval would silently delay a job by a whole
+    # cycle rather than shifting it within one.
+    assert all(0 <= minutes < 15 for minutes in SchedulerService.JOB_OFFSET_MINUTES.values())

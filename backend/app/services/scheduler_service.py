@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -160,6 +161,24 @@ class SchedulerService:
     PAIR_CONVERSATION_JOB_ID = "sim_pair_conversation"
     SMS_AUTO_REPLY_JOB_ID = "sms_auto_reply"
 
+    # All three of these talk to the same external TmLite service and the same
+    # SIMs. Anchoring them at the same instant means three simultaneous
+    # full-fleet enumerations every cycle, and two jobs racing for one SIM.
+    # Offsets spread them deterministically inside the fifteen-minute cycle;
+    # they must stay below the interval or a job slips a whole cycle.
+    JOB_OFFSET_MINUTES = {
+        PAIRING_JOB_ID: 0,
+        PAIR_CONVERSATION_JOB_ID: 5,
+        SMS_AUTO_REPLY_JOB_ID: 10,
+    }
+
+    def _interval_trigger(self, job_id: str) -> IntervalTrigger:
+        offset = self.JOB_OFFSET_MINUTES[job_id]
+        return IntervalTrigger(
+            minutes=15,
+            start_date=datetime.now(timezone.utc) + timedelta(minutes=offset),
+        )
+
     def set_activity_job(self, cron_expr: str):
         """Create or reschedule the daily activity scan."""
         self.scheduler.add_job(
@@ -171,13 +190,28 @@ class SchedulerService:
         log.info("Activity job scheduled", cron=cron_expr)
 
     def set_pairing_job(self):
-        self.scheduler.add_job(_execute_sim_pairing_sync, trigger=IntervalTrigger(minutes=15), id=self.PAIRING_JOB_ID, replace_existing=True)
+        self.scheduler.add_job(
+            _execute_sim_pairing_sync,
+            trigger=self._interval_trigger(self.PAIRING_JOB_ID),
+            id=self.PAIRING_JOB_ID,
+            replace_existing=True,
+        )
 
     def set_pair_conversation_job(self):
-        self.scheduler.add_job(_execute_sim_pair_conversation, trigger=IntervalTrigger(minutes=15), id=self.PAIR_CONVERSATION_JOB_ID, replace_existing=True)
+        self.scheduler.add_job(
+            _execute_sim_pair_conversation,
+            trigger=self._interval_trigger(self.PAIR_CONVERSATION_JOB_ID),
+            id=self.PAIR_CONVERSATION_JOB_ID,
+            replace_existing=True,
+        )
 
     def set_sms_auto_reply_job(self):
-        self.scheduler.add_job(_execute_sms_auto_reply, trigger=IntervalTrigger(minutes=15), id=self.SMS_AUTO_REPLY_JOB_ID, replace_existing=True)
+        self.scheduler.add_job(
+            _execute_sms_auto_reply,
+            trigger=self._interval_trigger(self.SMS_AUTO_REPLY_JOB_ID),
+            id=self.SMS_AUTO_REPLY_JOB_ID,
+            replace_existing=True,
+        )
 
 
 def is_valid_cron(cron_expr: str) -> bool:
