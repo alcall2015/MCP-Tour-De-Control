@@ -14,7 +14,7 @@ from app.models import Config, McpServer, SmsReply
 from app.services.mcp_service import _build_http_transport
 from app.services.sim_pairing_service import SimPairingService
 from app.services import sms_auto_reply_rules as rules
-from app.services.tmlite_shapes import normalize_call, normalize_sms, sim_index
+from app.services.tmlite_shapes import naive_iso, normalize_call, normalize_sms, sim_index, sms_is_older_than
 from app.utils import quiet_hours
 
 log = structlog.get_logger()
@@ -245,12 +245,6 @@ class SmsAutoReplyService:
             log.exception("sms_auto_reply_rollback_failed", trigger_ref=ref)
 
     @staticmethod
-    def _naive_iso(when: datetime) -> str:
-        """TmLite's from_date rejects an offset with a facade 500, not a
-        validation error. It wants naive ISO."""
-        return when.astimezone(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
-
-    @staticmethod
     async def _all_sims(client) -> list[dict]:
         """The fleet is small and needed in full for the index. Pages with skip."""
         rows = []
@@ -272,7 +266,7 @@ class SmsAutoReplyService:
         for page in range(1, 11):
             batch = SimPairingService._items(await client.call_tool(
                 "list_calls",
-                {"limit": 100, "page": page, "from_date": SmsAutoReplyService._naive_iso(since)},
+                {"limit": 100, "page": page, "from_date": naive_iso(since)},
             ))
             if not isinstance(batch, list) or not batch:
                 break
@@ -288,14 +282,14 @@ class SmsAutoReplyService:
         walking the whole table every fifteen minutes. Both timestamps are naive
         ISO, so a string comparison orders them correctly.
         """
-        cutoff = SmsAutoReplyService._naive_iso(since)
+        cutoff = naive_iso(since)
         rows = []
         for page in range(1, 11):
             batch = SimPairingService._items(await client.call_tool("list_sms", {"limit": 100, "page": page}))
             if not isinstance(batch, list) or not batch:
                 break
             for row in batch:
-                if str(row.get("received_at") or "") < cutoff:
+                if sms_is_older_than(row, cutoff):
                     return rows
                 rows.append(row)
             if len(batch) < 100:

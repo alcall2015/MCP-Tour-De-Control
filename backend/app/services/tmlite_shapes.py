@@ -5,6 +5,8 @@ assumption about its wire format lives here and nowhere else, so a rename
 upstream breaks one file with one test rather than the whole feature.
 """
 
+from datetime import datetime, timezone
+
 
 def _first(raw: dict, *names):
     for name in names:
@@ -59,3 +61,23 @@ def sim_index(sims: list[dict]) -> dict[tuple[str, int], int]:
         if gateway and slot is not None and sim_id is not None:
             index[(str(gateway), int(slot))] = int(sim_id)
     return index
+
+
+def naive_iso(when: datetime) -> str:
+    """TmLite's from_date rejects an offset with a facade 500 rather than a
+    validation error, so it must be given a naive ISO timestamp."""
+    return when.astimezone(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
+
+
+def sms_is_older_than(raw: dict, cutoff: str) -> bool:
+    """Is this inbound SMS older than the window's cutoff?
+
+    Returns False when no timestamp field can be found. That direction is
+    deliberate: a caller uses this to stop paging, so answering "old" for an
+    unrecognised row would end the window at the very first row and silently
+    process nothing at all. Answering "not old" costs an extra page instead.
+    """
+    stamped = _first(raw, "received_at", "created_at")
+    if stamped is None:
+        return False
+    return str(stamped) < cutoff

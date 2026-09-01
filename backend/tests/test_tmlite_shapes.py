@@ -1,7 +1,8 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
-from app.services.tmlite_shapes import normalize_call, normalize_sms, sim_index
+from app.services.tmlite_shapes import naive_iso, normalize_call, normalize_sms, sim_index, sms_is_older_than
 
 FIXTURES = json.loads((Path(__file__).parent / "fixtures" / "tmlite_payloads.json").read_text())
 
@@ -44,3 +45,26 @@ def test_a_renamed_slot_field_still_resolves_the_sim():
     expected = row.pop("sim_card_slot")
     row["slot"] = expected
     assert normalize_call(row)["slot"] == int(expected)
+
+
+def test_naive_iso_emits_no_offset():
+    # TmLite's from_date answers a facade 500 when given an offset.
+    stamped = naive_iso(datetime(2026, 9, 1, 13, 5, 9, tzinfo=timezone.utc))
+    assert stamped == "2026-09-01T13:05:09"
+    assert "+" not in stamped and "Z" not in stamped
+
+
+def test_a_row_older_than_the_cutoff_is_older():
+    assert sms_is_older_than({"received_at": "2026-09-01T12:00:00"}, "2026-09-01T13:00:00")
+
+
+def test_a_row_newer_than_the_cutoff_is_not_older():
+    assert not sms_is_older_than({"received_at": "2026-09-01T14:00:00"}, "2026-09-01T13:00:00")
+
+
+def test_a_row_whose_timestamp_field_was_renamed_is_never_treated_as_old():
+    # The whole point: a missing timestamp must not silently end the window and
+    # kill the feature. Keeping the row costs one extra page; dropping it costs
+    # everything.
+    assert not sms_is_older_than({"stamped_at": "2026-09-01T12:00:00"}, "2026-09-01T13:00:00")
+    assert not sms_is_older_than({}, "2026-09-01T13:00:00")
