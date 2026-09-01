@@ -176,5 +176,7 @@ async def test_the_three_tmlite_jobs_do_not_fire_on_the_same_tick():
 
 def test_every_offset_stays_inside_one_cycle():
     # An offset at or beyond the interval would silently delay a job by a whole
-    # cycle rather than shifting it within one.
-    assert all(0 <= minutes < 15 for minutes in SchedulerService.JOB_OFFSET_MINUTES.values())
+    # cycle rather than shifting it within one. Zero is not usable either: it
+    # makes start_date equal "now", which APScheduler reads as already elapsed
+    # and pushes the first fire out by a full interval.
+    assert all(0 < minutes < 15 for minutes in SchedulerService.JOB_OFFSET_MINUTES.values())

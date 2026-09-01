@@ -14,6 +14,13 @@ from app.models import SimPair, SimPairHistory, SimPairMessage, SimPairMessageQu
 
 log = structlog.get_logger()
 
+# Upper bound on the pairs deleted per call. Without it the first purge to meet
+# a real backlog would delete every eligible pair at once: one large transaction
+# holding locks on four tables, with `pair_id IN (...)` expanding to one bind
+# parameter per id against asyncpg's 32767 limit. The job runs every fifteen
+# minutes, so a backlog drains over successive runs instead of in one stall.
+PURGE_BATCH_SIZE = 500
+
 
 async def purge_archived_pairs(session, retention_days: int) -> dict:
     empty = {"pairs": 0, "messages": 0, "history": 0, "queue": 0}
@@ -29,6 +36,10 @@ async def purge_archived_pairs(session, retention_days: int) -> dict:
             SimPair.archived_at.is_not(None),
             SimPair.archived_at < cutoff,
         )
+        # Oldest first, so repeated runs always advance through the backlog
+        # rather than revisiting the same batch.
+        .order_by(SimPair.archived_at)
+        .limit(PURGE_BATCH_SIZE)
     )).scalars())
     if not pair_ids:
         return empty

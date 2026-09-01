@@ -171,11 +171,15 @@ class SchedulerService:
     # SIMs. Anchoring them at the same instant means three simultaneous
     # full-fleet enumerations every cycle, and two jobs racing for one SIM.
     # Offsets spread them deterministically inside the fifteen-minute cycle;
-    # they must stay below the interval or a job slips a whole cycle.
+    # they must stay below the interval or a job slips a whole cycle. They must
+    # also stay strictly above zero: an offset of zero puts start_date at "now",
+    # which APScheduler treats as already elapsed, so the first fire lands a
+    # whole interval later — a backend restarting more often than the interval
+    # would then never run that job at all.
     JOB_OFFSET_MINUTES = {
-        PAIRING_JOB_ID: 0,
-        PAIR_CONVERSATION_JOB_ID: 5,
-        SMS_AUTO_REPLY_JOB_ID: 10,
+        PAIRING_JOB_ID: 1,
+        PAIR_CONVERSATION_JOB_ID: 6,
+        SMS_AUTO_REPLY_JOB_ID: 11,
     }
 
     def _interval_trigger(self, job_id: str) -> IntervalTrigger:
