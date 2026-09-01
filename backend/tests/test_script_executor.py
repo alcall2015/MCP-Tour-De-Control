@@ -1,4 +1,5 @@
 import os
+import sys
 
 # Set ENCRYPTION_KEY before any app imports
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
@@ -158,3 +159,10 @@ async def test_execute_script_sets_duration(session):
     assert execution.duration_ms >= 0
     assert execution.finished_at is not None
     assert execution.tokens_used == 5
+
+
+def test_the_interpreter_is_the_one_running_the_backend():
+    # Generated scripts import fastmcp and openai, which live in this
+    # environment. Resolving "python" from PATH finds a different interpreter
+    # or, on macOS, none at all.
+    assert ScriptExecutor._interpreter() == sys.executable

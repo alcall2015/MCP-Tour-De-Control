@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -34,7 +35,7 @@ class ScriptExecutor:
 
         try:
             process = await asyncio.create_subprocess_exec(
-                "python", "-c", script.code,
+                ScriptExecutor._interpreter(), "-c", script.code,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
@@ -90,6 +91,10 @@ class ScriptExecutor:
             await session.commit()
             log.error("Script execution error", script_id=str(script.id), error=str(e))
             return execution
+
+    @staticmethod
+    def _interpreter() -> str:
+        return settings.SCRIPT_PYTHON or sys.executable
 
     @staticmethod
     async def _build_env(session: AsyncSession) -> dict:

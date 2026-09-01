@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = "generate-a-fernet-key-here"
     DEFAULT_SCRIPT_TIMEOUT: int = 300
     SIPP_MCP_URL: str = "http://localhost:9090/mcp"
+    # Empty means "the interpreter running this backend", which is the only one
+    # guaranteed to have the generated scripts' dependencies installed.
+    SCRIPT_PYTHON: str = ""
 
     model_config = {"env_file": ".env"}
 
