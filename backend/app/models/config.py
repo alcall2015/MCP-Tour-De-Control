@@ -46,6 +46,9 @@ class Config(Base):
     # attempt being a distinct CDR row. Uniqueness on trigger_ref would let all
     # of them through, so a recipient is also silenced for a while.
     sms_autoreply_recipient_cooldown_hours: Mapped[int] = mapped_column(Integer, default=24)
+    # 0 keeps archived pairs forever. Deleting one removes its messages,
+    # history and queue rows too — there is no foreign key to cascade.
+    pairing_archive_retention_days: Mapped[int] = mapped_column(Integer, default=90)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )

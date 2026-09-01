@@ -62,9 +62,15 @@ async def _execute_activity_scan():
 
 async def _execute_sim_pairing_sync():
     from app.database import async_session
+    from app.models import Config
+    from sqlalchemy import select
     from app.services.sim_pairing_service import SimPairingService
+    from app.services.sim_pairing_retention import purge_archived_pairs
     async with async_session() as session:
         await SimPairingService.sync(session)
+        config = (await session.execute(select(Config).limit(1))).scalar_one_or_none()
+        if config:
+            await purge_archived_pairs(session, config.pairing_archive_retention_days)
 
 
 async def _execute_sim_pair_conversation():

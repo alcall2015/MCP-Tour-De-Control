@@ -67,6 +67,7 @@ def _to_read(config: Config) -> ConfigRead:
         sms_autoreply_max_per_run=config.sms_autoreply_max_per_run,
         sms_autoreply_lookback_minutes=config.sms_autoreply_lookback_minutes,
         sms_autoreply_recipient_cooldown_hours=config.sms_autoreply_recipient_cooldown_hours,
+        pairing_archive_retention_days=config.pairing_archive_retention_days,
         updated_at=config.updated_at,
     )
 
@@ -192,6 +193,12 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
         config.sms_autoreply_lookback_minutes = lookback
     if data.sms_autoreply_recipient_cooldown_hours is not None:
         config.sms_autoreply_recipient_cooldown_hours = cooldown
+
+    if data.pairing_archive_retention_days is not None:
+        if not 0 <= data.pairing_archive_retention_days <= 3650:
+            raise HTTPException(status_code=422,
+                                detail="pairing_archive_retention_days must be between 0 and 3650")
+        config.pairing_archive_retention_days = data.pairing_archive_retention_days
 
     await session.commit()
     await session.refresh(config)
