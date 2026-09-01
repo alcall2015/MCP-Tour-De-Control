@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
 
@@ -114,6 +115,48 @@ async def test_a_sim_with_an_existing_record_keeps_its_name_and_gets_country_ref
     )).scalar_one()
     assert record.display_name == "Fatou"
     assert record.country == "SN"
+
+
+async def test_ensure_sim_names_never_falls_back_to_a_sim_id_label(session):
+    """Even when far more SIMs need a name than the base pool holds, the
+    fallback must compose a two-word name from the pool, never
+    f"SIM {sim_id}" — that string is the single most obvious tell to a
+    carrier's fraud detection that this traffic is machine-generated."""
+    pool_size = len(SimPairingService.WEST_AFRICAN_NAMES)
+    eligible = {sim_id: {"country": "CI", "group": "love"} for sim_id in range(1, pool_size + 10)}
+
+    names, assigned = await SimPairingService._ensure_sim_names(session, eligible)
+    await session.commit()
+
+    assert assigned == len(eligible)
+    for sim_id, name in names.items():
+        assert not re.match(r"(?i)^sim\s*\d", name), f"sim {sim_id} got machine-looking name {name!r}"
+    assert len(set(names.values())) == len(names)  # every generated name is unique
+
+
+async def test_compound_fallback_name_is_unique_against_a_sim_outside_the_batch(session):
+    """The unique-name check must span every row in the table, not just the
+    batch being processed, even when the fallback has to compose a two-word
+    name — checking only the batch is exactly the mistake that caused a
+    production outage (a unique-constraint violation) last week."""
+    names_pool = SimPairingService.WEST_AFRICAN_NAMES
+    taken_compound = f"{names_pool[0]} {names_pool[1]}"
+    # A SIM outside this run's batch already holds what would otherwise be
+    # the very first compound name generated below.
+    session.add(SimPairingSim(sim_id=999999, display_name=taken_compound, country="GN"))
+    # Fill the entire base pool with other SIMs so the batch below must fall
+    # back to a compound name.
+    for offset, name in enumerate(names_pool):
+        session.add(SimPairingSim(sim_id=100000 + offset, display_name=name, country="CI"))
+    await session.commit()
+
+    eligible = {1: {"country": "CI", "group": "love"}}
+    names, assigned = await SimPairingService._ensure_sim_names(session, eligible)
+    await session.commit()  # must not raise a unique-constraint IntegrityError
+
+    assert assigned == 1
+    assert names[1] != taken_compound
+    assert " " in names[1]  # composed of two pool names, not a bare pool entry
 
 
 async def test_sync_records_a_failed_run_instead_of_leaving_it_stuck_running(session):
@@ -236,3 +279,22 @@ async def test_two_idle_sims_still_get_paired(session):
     pairs = list((await session.execute(select(SimPair))).scalars())
     assert len(pairs) == 1
     assert {pairs[0].sim_a_id, pairs[0].sim_b_id} == {1, 2}
+
+
+async def test_existing_sim_names_survive_a_run_that_exhausts_the_pool(session):
+    """A SIM already named must never be renamed just because enough new SIMs
+    arrive in the same run to exhaust the base pool and need compound
+    fallback names."""
+    await _seed_pairing_config(session)
+    session.add(SimPairingSim(sim_id=1, display_name="Aïssata", country="CI"))
+    await session.commit()
+
+    pool_size = len(SimPairingService.WEST_AFRICAN_NAMES)
+    sims = [_sim(1, "IDLE")] + [_sim(sim_id, "IDLE") for sim_id in range(2, pool_size + 5)]
+    with patch(f"{MODULE}.Client", lambda transport: _FleetMcpClient(sims)):
+        await SimPairingService.sync(session)
+
+    record = (await session.execute(
+        select(SimPairingSim).where(SimPairingSim.sim_id == 1)
+    )).scalar_one()
+    assert record.display_name == "Aïssata"

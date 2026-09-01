@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy import select, update
 
 from app.models import Config, McpServer, SimPair, SimPairHistory, SimPairMessage, SimPairMessageQueue
@@ -268,6 +269,28 @@ async def test_an_invalid_generation_is_recorded_and_retried(session):
     assert item.status == "pending" and item.attempts == 1
     await session.refresh(pair)
     assert pair.sent_count == 0
+
+
+async def test_generate_message_rejects_a_machine_looking_label(session):
+    """A generated SMS naming a SIM ("SIM 882") is the single most obvious
+    tell to a carrier's fraud detection that this traffic is machine-driven,
+    so it must be rejected rather than delivered — whatever produced it."""
+    config = await _configure(session)
+    pair = await _pair(session)
+
+    with _tmlite([_sim(1), _sim(2)], contents=["SIM 882, comment vas-tu ?"]):
+        with pytest.raises(RuntimeError, match="machine-looking label"):
+            await Service._generate_message(session, pair, None, config)
+
+
+async def test_generate_message_accepts_the_same_message_without_the_label(session):
+    config = await _configure(session)
+    pair = await _pair(session)
+
+    with _tmlite([_sim(1), _sim(2)], contents=["Coucou, comment vas-tu ?"]):
+        content = await Service._generate_message(session, pair, None, config)
+
+    assert content == "Coucou, comment vas-tu ?"
 
 
 async def test_an_archived_pairs_due_queue_row_is_not_sent(session):

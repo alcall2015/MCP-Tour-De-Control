@@ -29,10 +29,34 @@ class SimPairingService:
 
     # These are local labels for the pairing application. They never rename a
     # SIM in TmLite, so carrier-facing configuration stays untouched.
+    #
+    # The original twenty stay first and in place so no currently-assigned SIM
+    # is ever renamed by this expansion. The rest give the pool enough headroom
+    # that it should never run dry against the live fleet; if it ever does,
+    # _ensure_sim_names composes a two-word name from this same list rather
+    # than falling back to a machine-looking label.
     WEST_AFRICAN_NAMES = (
         "Aïssata", "Aminata", "Adama", "Awa", "Binta", "Fatou", "Kadiatou",
         "Mariama", "Ndeye", "Sira", "Abdou", "Amadou", "Cheikh", "Ibrahima",
         "Koffi", "Moussa", "Ousmane", "Sékou", "Yao", "Youssouf",
+        "Aïcha", "Astou", "Aminatou", "Assiatou", "Ami", "Adjoa", "Ama",
+        "Bineta", "Bintou", "Coumba", "Djeneba", "Djénébou", "Djeynaba",
+        "Fanta", "Fatim", "Fatimata", "Fatoumata", "Habibatou", "Hawa",
+        "Kadidja", "Kadidiatou", "Kani", "Khady", "Kiné", "Korotoumou",
+        "Kumba", "Mah", "Maimouna", "Mame", "Marème", "Mariatou", "Massaran",
+        "Nabou", "Nafissatou", "Nana", "Nassira", "Ndella", "Nènè",
+        "Oulimata", "Oumou", "Ramatoulaye", "Rokhaya", "Rokia", "Rougui",
+        "Safiatou", "Salimata", "Saran", "Setou", "Sokhna", "Soukeyna",
+        "Tening", "Yacine", "Zeinabou", "Akissi", "Affoué", "Amenan", "Aya",
+        "Alassane", "Alioune", "Assane", "Babacar", "Bakary", "Boubacar",
+        "Demba", "Elhadji", "Falilou", "Habib", "Hamidou", "Idrissa", "Issa",
+        "Issoufou", "Karim", "Lamine", "Landry", "Lassana", "Macoumba",
+        "Mamadou", "Mansour", "Mor", "Modou", "Momar", "Modibo", "Ndiaga",
+        "Ngor", "Omar", "Oumar", "Pape", "Pathé", "Saliou", "Samba",
+        "Serigne", "Souleymane", "Tapha", "Thierno", "Vieux", "Yankuba",
+        "Zakaria", "Kouassi", "Kouamé", "Kojo", "Kwame", "Kwesi", "Seydou",
+        "Sidiki", "Sanou", "Boureima", "Rasmané", "Tiémoko", "Yacouba",
+        "Zoumana",
     )
 
     @staticmethod
@@ -185,7 +209,7 @@ class SimPairingService:
                 record.country = eligible[sim_id]["country"]
                 continue
             base = next((name for name in SimPairingService.WEST_AFRICAN_NAMES if name not in used_names), None)
-            display_name = base or f"SIM {sim_id}"
+            display_name = base or SimPairingService._compound_name(used_names)
             record = SimPairingSim(
                 sim_id=sim_id,
                 display_name=display_name,
@@ -197,6 +221,27 @@ class SimPairingService:
             assigned += 1
         await session.flush()
         return {sim_id: record.display_name for sim_id, record in by_id.items()}, assigned
+
+    @staticmethod
+    def _compound_name(used_names):
+        """Compose a still-human two-word name once the base pool is exhausted.
+
+        130 names pair into far more two-word combinations than SIMs will ever
+        exist, and a name like "Aminata Fatou" still reads as an ordinary
+        person to a carrier. A bare `f"SIM {sim_id}"` fallback does the exact
+        opposite: it is the single most obvious tell that the traffic is
+        machine-generated, so it must never be produced here, no matter how
+        many SIMs are in play.
+        """
+        names = SimPairingService.WEST_AFRICAN_NAMES
+        for first in names:
+            for second in names:
+                if first == second:
+                    continue
+                candidate = f"{first} {second}"
+                if candidate not in used_names:
+                    return candidate
+        raise RuntimeError("Exhausted the West African name pool and its two-word combinations")
 
     @staticmethod
     async def _finish(session, run, summary):

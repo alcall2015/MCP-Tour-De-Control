@@ -1,6 +1,7 @@
 """Generate and deliver controlled continuations for active SIM pairs."""
 import asyncio
 import random
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastmcp import Client
@@ -29,6 +30,11 @@ class SimPairConversationService:
     OVERFETCH = 4
     # Everything held overnight would otherwise come due at the same second.
     WAKE_SPREAD_MINUTES = 90
+    # Naming is fixed upstream (SimPairingService never assigns a "SIM {id}"
+    # label anymore), but this catches the same tell from any other source —
+    # the model inventing it, a stale name, a future regression — before an
+    # SMS reading "SIM 882, ..." reaches a real phone and tips off the carrier.
+    MACHINE_LABEL_PATTERN = re.compile(r"sim\s*\d", re.IGNORECASE)
 
     @staticmethod
     async def run_due(session, dry_run: bool = False, limit: int | None = None, country: str | None = None) -> dict:
@@ -443,6 +449,8 @@ class SimPairConversationService:
         )
         if not content or len(content) > 240:
             raise RuntimeError("OpenRouter returned an invalid SMS")
+        if SimPairConversationService.MACHINE_LABEL_PATTERN.search(content):
+            raise RuntimeError("Generated SMS contains a machine-looking label")
         return content
 
     @staticmethod
