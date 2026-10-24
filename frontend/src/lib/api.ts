@@ -76,6 +76,18 @@ export const togglePrompt = (id: string) =>
 export const regenerateScript = (id: string) =>
   request<Script>(`/prompts/${id}/regenerate`, { method: "POST" });
 
+// Agents
+export const listAgents = (status?: AgentStatus) =>
+  request<Agent[]>(`/agents${status ? `?status=${status}` : ""}`);
+export const createAgent = (data: AgentCreate) =>
+  request<Agent>("/agents", { method: "POST", body: JSON.stringify(data) });
+export const updateAgent = (id: string, data: AgentUpdate) =>
+  request<Agent>(`/agents/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteAgent = (id: string) =>
+  request<void>(`/agents/${id}`, { method: "DELETE" });
+export const setAgentStatus = (id: string, status: AgentStatus) =>
+  request<Agent>(`/agents/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) });
+
 // Scripts
 export const listScripts = (promptId: string) =>
   request<Script[]>(`/prompts/${promptId}/scripts`);
@@ -237,6 +249,35 @@ export interface PromptCreate {
   enabled?: boolean;
   mcp_server_ids: string[];
 }
+export type AgentStatus = "draft" | "active" | "paused" | "archived";
+export interface AgentServerRef {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+export interface Agent {
+  id: string;
+  name: string;
+  objective: string;
+  instructions: string;
+  description: string | null;
+  status: AgentStatus;
+  max_steps: number;
+  timeout_seconds: number;
+  created_at: string;
+  updated_at: string;
+  mcp_servers: AgentServerRef[];
+}
+export interface AgentCreate {
+  name: string;
+  objective: string;
+  instructions?: string;
+  description?: string;
+  max_steps?: number;
+  timeout_seconds?: number;
+  mcp_server_ids: string[];
+}
+export type AgentUpdate = Partial<AgentCreate>;
 export interface Script {
   id: string;
   prompt_id: string;

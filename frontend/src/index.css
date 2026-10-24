@@ -197,3 +197,16 @@ body {
   height: 2px;
   background: linear-gradient(90deg, var(--accent) 0%, rgba(226,179,64,0.3) 60%, transparent 100%);
 }
+
+/* ─── Modal ───────────────────────────────────────────────────── */
+.modal-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(5, 8, 14, .62); backdrop-filter: blur(6px); }
+.modal-panel { display: flex; flex-direction: column; width: min(640px, 100%); max-height: calc(100vh - 48px); box-shadow: 0 24px 60px rgba(0,0,0,.45); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 12px; border-bottom: 1px solid var(--border); }
+.modal-head h3 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+.modal-close { width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text-secondary); font-size: 18px; line-height: 1; cursor: pointer; }
+.modal-close:hover { color: var(--text-primary); background: rgba(255,255,255,.05); }
+.modal-body { padding: 18px 22px 22px; overflow-y: auto; }
+@media (max-width: 640px) { .modal-overlay { padding: 0; align-items: stretch; } .modal-panel { width: 100%; max-height: 100vh; border-radius: 0; } }
+
+/* Compact variant for row actions; declared after the base button rules so it wins at equal specificity. */
+.btn-sm { padding: 0.3rem 0.7rem; font-size: 0.75rem; }
