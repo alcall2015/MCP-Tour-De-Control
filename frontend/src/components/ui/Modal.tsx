@@ -11,6 +11,9 @@ const FOCUSABLE = 'input, textarea, select, button:not([data-modal-close]), [hre
 
 export function Modal({ open, title, onClose, children }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
+  // Keep the latest onClose reachable from the effect without re-running it on every parent render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -19,7 +22,7 @@ export function Modal({ open, title, onClose, children }: Props) {
     first?.focus();
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     const previousOverflow = document.body.style.overflow;
@@ -29,7 +32,7 @@ export function Modal({ open, title, onClose, children }: Props) {
       document.body.style.overflow = previousOverflow;
       previouslyFocused?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
