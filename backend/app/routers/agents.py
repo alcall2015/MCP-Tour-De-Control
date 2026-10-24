@@ -33,7 +33,8 @@ def _to_read(agent: Agent) -> AgentRead:
 
 async def _load_servers(session: AsyncSession, ids: list[uuid.UUID]) -> list[McpServer]:
     servers = []
-    for sid in ids:
+    # A repeated id would violate agent_mcp_server's composite primary key; keep first occurrence order.
+    for sid in dict.fromkeys(ids):
         server = await session.get(McpServer, sid)
         if not server:
             raise HTTPException(status_code=404, detail=f"MCP server {sid} not found")

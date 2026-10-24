@@ -123,3 +123,10 @@ async def test_list_orders_newest_first():
         await create_agent(c, name="second")
         resp = await c.get("/api/v1/agents")
     assert [a["name"] for a in resp.json()] == ["second", "first"]
+
+
+async def test_create_agent_dedupes_server_ids(setup_test_db):
+    sid = await create_server(setup_test_db, "TmLite")
+    async with client() as c:
+        data = await create_agent(c, mcp_server_ids=[sid, sid])
+    assert [s["id"] for s in data["mcp_servers"]] == [sid]
