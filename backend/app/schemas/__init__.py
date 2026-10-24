@@ -8,6 +8,7 @@ from app.schemas.chat import ConversationRead, ChatMessageRead, ChatMessageCreat
 from app.schemas.activity import DocumentRead, SectionRead, HeatmapDay, HeatmapRead, ScanResult
 from app.schemas.sim_pairing import SimPairingGroupCreate, SimPairingGroupRead, SimPairingTopicCreate, SimPairingTopicRead, SimPairRead, SimPairHistoryRead, SimPairMessageRead, SimPairMessageQueueRead
 from app.schemas.sms_reply import SmsReplyRead, SmsAutoReplyStats
+from app.schemas.agent import AgentServerRef, AgentCreate, AgentUpdate, AgentStatusUpdate, AgentRead
 
 __all__ = [
     "ConfigRead", "ConfigUpdate",
@@ -20,4 +21,5 @@ __all__ = [
     "DocumentRead", "SectionRead", "HeatmapDay", "HeatmapRead", "ScanResult",
     "SimPairingGroupCreate", "SimPairingGroupRead", "SimPairingTopicCreate", "SimPairingTopicRead", "SimPairRead", "SimPairHistoryRead", "SimPairMessageRead", "SimPairMessageQueueRead",
     "SmsReplyRead", "SmsAutoReplyStats",
+    "AgentServerRef", "AgentCreate", "AgentUpdate", "AgentStatusUpdate", "AgentRead",
 ]
