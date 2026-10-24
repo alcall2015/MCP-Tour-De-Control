@@ -44,6 +44,10 @@ Backend env (`backend/.env` or process env): `DATABASE_URL`, `ENCRYPTION_KEY` (F
 
 This is arbitrary code execution by design — there is no sandbox, and the subprocess inherits the backend's environment. The API has no auth of its own; nginx basic auth is the only gate.
 
+### Agents
+
+`Agent` rows (`models/agent.py`) describe autonomous agents: objective, instructions, allowed MCP servers through the `agent_mcp_server` association table (cascade both sides), `max_steps` and `timeout_seconds`. Nothing executes them yet — this is the P0 "socle" of `docs/superpowers/specs/2026-10-24-agents-crud-design.md`. Lifecycle is `draft → active ⇄ paused → archived → draft`, enforced by `ALLOWED_TRANSITIONS` in `routers/agents.py`; activation requires at least one **enabled** authorised server, deletion is only allowed for `draft` and `archived`. The LLM model is inherited from the global `Config`, not stored per agent.
+
 ### Scheduling
 
 `scheduler_service` is a module-level singleton created at import time, backed by an APScheduler `SQLAlchemyJobStore` on a **sync** URL derived from `DATABASE_URL` (`+asyncpg` stripped); it falls back to an in-memory jobstore if the DB is unreachable, which is what makes tests importable. Job ids are `prompt_{uuid}`. Prompt CRUD keeps the scheduler in sync inline (create → `add_job`, cron change → `reschedule_job`, toggle → `pause_job`/`resume_job`, delete → `remove_job`), and `main.py`'s lifespan re-adds jobs for every enabled prompt with a cron on startup. Jobs run with `coalesce=True`, `max_instances=1`, `misfire_grace_time=3600`.
