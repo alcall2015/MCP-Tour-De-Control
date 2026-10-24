@@ -1,9 +1,10 @@
 import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { listPrompts, listMcpServers } from "../../lib/api";
+import { listAgents, listPrompts, listMcpServers } from "../../lib/api";
 
 const tabs = [
   { to: "/", label: "Prompts" },
+  { to: "/agents", label: "Agents" },
   { to: "/reports", label: "Reports" },
   { to: "/activity", label: "Activity" },
   { to: "/pairing", label: "SIM Pairing" },
@@ -24,9 +25,15 @@ function StatusStrip() {
     queryFn: listPrompts,
     refetchInterval: 30000,
   });
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents", "all"],
+    queryFn: () => listAgents(),
+    refetchInterval: 30000,
+  });
 
   const activeServers = servers.filter((s) => s.enabled).length;
   const activePrompts = prompts.filter((p) => p.enabled).length;
+  const activeAgents = agents.filter((a) => a.status === "active").length;
   const isRunning = activeServers > 0;
 
   return (
@@ -47,6 +54,15 @@ function StatusStrip() {
         />
         <span style={{ color: activePrompts === 0 ? "var(--text-muted)" : "var(--warning)" }}>
           {activePrompts} prompt{activePrompts !== 1 ? "s" : ""}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5 text-xs font-medium">
+        <span
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ backgroundColor: activeAgents > 0 ? "var(--success)" : "var(--text-muted)" }}
+        />
+        <span style={{ color: activeAgents === 0 ? "var(--text-muted)" : "var(--success)" }}>
+          {activeAgents} agent{activeAgents !== 1 ? "s" : ""}
         </span>
       </div>
     </div>
