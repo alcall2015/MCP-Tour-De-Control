@@ -19,6 +19,7 @@ Spec: `docs/superpowers/specs/2026-10-24-agents-crud-design.md`.
 - No per-agent model/API key, no versioning, no execution, no scheduler job.
 - Every new model is exported from `app/models/__init__.py`; every new schema from `app/schemas/__init__.py`.
 - All frontend HTTP calls and shared interfaces go in `frontend/src/lib/api.ts`.
+- Frontend tasks (5 to 8) are implemented in the git worktree `/Users/yebe/Desktop/MCP-Tour-De-Control/.worktrees/agents-ui` on branch `feat/agents-ui`, against the **committed** frontend (top navigation bar in `TabNav.tsx`, no light theme). The main checkout holds an uncommitted sidebar redesign that must stay untouched; the user chose to build the Agents UI on the committed navigation.
 - Code, comments, UI copy in English. No emojis in navigation.
 - Conventional Commits, e.g. `feat(agents): ...`. End commit messages with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Backend commands run from `backend/` with `venv/bin/python`; tests need the live test Postgres (`mcp_control_test`).
@@ -45,7 +46,7 @@ Spec: `docs/superpowers/specs/2026-10-24-agents-crud-design.md`.
 | `frontend/src/components/Agents/AgentList.tsx` | query + mutations + empty state |
 | `frontend/src/pages/AgentsPage.tsx` | header, Active/Archived filter, modal state |
 | `frontend/src/App.tsx` | `/agents` route |
-| `frontend/src/components/Layout/TabNav.tsx` | "Agents" tab, icon, "Active agents" status line |
+| `frontend/src/components/Layout/TabNav.tsx` | "Agents" tab in the top bar, agents counter in `StatusStrip` |
 
 ---
 
@@ -1096,7 +1097,6 @@ Append to `frontend/src/index.css`:
 .modal-close { width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text-secondary); font-size: 18px; line-height: 1; cursor: pointer; }
 .modal-close:hover { color: var(--text-primary); background: rgba(255,255,255,.05); }
 .modal-body { padding: 18px 22px 22px; overflow-y: auto; }
-:root[data-theme="light"] .modal-overlay { background: rgba(23, 35, 53, .35); }
 @media (max-width: 640px) { .modal-overlay { padding: 0; align-items: stretch; } .modal-panel { width: 100%; max-height: 100vh; border-radius: 0; } }
 
 /* Compact variant for row actions; declared after the base button rules so it wins at equal specificity. */
@@ -1521,32 +1521,37 @@ and the route right after the index route:
             <Route path="agents" element={<AgentsPage />} />
 ```
 
-- [ ] **Step 5: Add the tab, icon and status line in `TabNav.tsx`**
+- [ ] **Step 5: Add the tab and the status line in `TabNav.tsx`**
 
-In `frontend/src/components/Layout/TabNav.tsx`:
+The committed `TabNav.tsx` is a top navigation bar: a `tabs` array of `{ to, label }`, a `StatusStrip` component with two counters (servers, prompts), and the `TabNav` export rendering them. Make three changes:
 
-1. Import: change line 4 to `import { listAgents, listPrompts, listMcpServers } from "../../lib/api";`
-2. `IconName`: add `"agent"` → `type IconName = "automation" | "agent" | "reports" | ...`.
-3. `tabs`: insert as the second entry:
-   ```ts
-   { to: "/agents", label: "Agents", eyebrow: "Autonomous runs", icon: "agent" },
-   ```
-4. `Icon` paths: add
+1. Import: change the api import line to `import { listAgents, listPrompts, listMcpServers } from "../../lib/api";`
+2. `tabs`: insert `{ to: "/agents", label: "Agents" },` immediately after the `{ to: "/", label: "Prompts" },` entry.
+3. `StatusStrip`: add a third counter. After the `prompts` query add
+
    ```tsx
-   agent: <><rect x="5" y="8" width="14" height="11" rx="2.5"/><path d="M12 3.5v4.5M9 12.5h.01M15 12.5h.01M9.5 16h5"/><path d="M3 12.5h2M19 12.5h2"/></>,
+   const { data: agents = [] } = useQuery({
+     queryKey: ["agents", "all"],
+     queryFn: () => listAgents(),
+     refetchInterval: 30000,
+   });
    ```
-5. `SystemStatus`: add the query and the line:
+
+   after `const activePrompts = ...` add `const activeAgents = agents.filter((a) => a.status === "active").length;`, and after the prompts `<div className="flex items-center gap-1.5 text-xs font-medium">…</div>` block add
+
    ```tsx
-   const { data: agents = [] } = useQuery({ queryKey: ["agents", "all"], queryFn: () => listAgents(), refetchInterval: 30000 });
-   const activeAgents = agents.filter((agent) => agent.status === "active").length;
+   <div className="flex items-center gap-1.5 text-xs font-medium">
+     <span
+       className="h-1.5 w-1.5 rounded-full"
+       style={{ backgroundColor: activeAgents > 0 ? "var(--success)" : "var(--text-muted)" }}
+     />
+     <span style={{ color: activeAgents === 0 ? "var(--text-muted)" : "var(--success)" }}>
+       {activeAgents} agent{activeAgents !== 1 ? "s" : ""}
+     </span>
+   </div>
    ```
-   and inside the returned JSX, after the "Active flows" line:
-   ```tsx
-   <div className="system-status-line"><i className={activeAgents ? "is-live" : ""}/><span>Active agents</span><b>{activeAgents}</b></div>
-   ```
-6. Section slices in `TabNav`: the sidebar renders three groups. Change them to
-   `tabs.slice(0, 4)` (Automate), `tabs.slice(4, 7)` (Telephony), `tabs.slice(7)` (Support).
-   `primaryTabs = tabs.slice(0, 4)` and `secondaryTabs = tabs.slice(4)` already read the first four, so the mobile bar keeps its five cells (four tabs + More).
+
+No icon, no eyebrow, no section slices: those belong to the uncommitted sidebar redesign and are out of scope.
 
 - [ ] **Step 6: Lint, build, and check the page in a browser**
 
@@ -1557,7 +1562,7 @@ Then with the backend running (`venv/bin/uvicorn app.main:app --reload` from `ba
 
 - Empty state shows, `+ New Agent` opens the modal, Escape closes it, focus lands in the Name field.
 - Creating with no servers yields a `Draft` card; Activate shows the "needs at least one enabled MCP server" error under the card.
-- Edit → tick a server → Save → Activate works, badge turns green, "Active agents" in the sidebar goes to 1.
+- Edit → tick a server → Save → Activate works, badge turns green, the top-bar status strip shows "1 agent".
 - Pause, Resume, Archive; the Archived view shows it with Restore / Delete; Delete needs the confirm step.
 - No horizontal scroll at 375px width; the modal is full-screen there.
 
