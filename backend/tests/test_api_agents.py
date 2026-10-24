@@ -130,3 +130,91 @@ async def test_create_agent_dedupes_server_ids(setup_test_db):
     async with client() as c:
         data = await create_agent(c, mcp_server_ids=[sid, sid])
     assert [s["id"] for s in data["mcp_servers"]] == [sid]
+
+
+# ---- update / delete -----------------------------------------------------
+
+async def set_status(async_session, agent_id: str, status: str) -> None:
+    from app.models import Agent
+    async with async_session() as session:
+        agent = await session.get(Agent, uuid.UUID(agent_id))
+        agent.status = status
+        await session.commit()
+
+
+async def test_update_fields_and_replace_servers(setup_test_db):
+    s1 = await create_server(setup_test_db, "one")
+    s2 = await create_server(setup_test_db, "two")
+    async with client() as c:
+        data = await create_agent(c, mcp_server_ids=[s1])
+        resp = await c.put(f"/api/v1/agents/{data['id']}", json={
+            "name": "Renamed", "max_steps": 5, "mcp_server_ids": [s2],
+        })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Renamed"
+    assert body["max_steps"] == 5
+    assert body["objective"] == "Find the root cause"          # untouched
+    assert [s["id"] for s in body["mcp_servers"]] == [s2]        # replaced, not merged
+    assert body["updated_at"] > data["updated_at"]
+
+
+async def test_update_without_server_ids_keeps_servers(setup_test_db):
+    s1 = await create_server(setup_test_db, "one")
+    async with client() as c:
+        data = await create_agent(c, mcp_server_ids=[s1])
+        resp = await c.put(f"/api/v1/agents/{data['id']}", json={"description": "note"})
+    assert resp.status_code == 200
+    assert [s["id"] for s in resp.json()["mcp_servers"]] == [s1]
+    assert resp.json()["description"] == "note"
+
+
+async def test_update_unknown_server_404_and_not_found():
+    async with client() as c:
+        data = await create_agent(c)
+        resp = await c.put(f"/api/v1/agents/{data['id']}", json={"mcp_server_ids": [str(uuid.uuid4())]})
+        assert resp.status_code == 404
+        resp = await c.put(f"/api/v1/agents/{uuid.uuid4()}", json={"name": "x"})
+        assert resp.status_code == 404
+
+
+async def test_update_archived_409(setup_test_db):
+    async with client() as c:
+        data = await create_agent(c)
+        await set_status(setup_test_db, data["id"], "archived")
+        resp = await c.put(f"/api/v1/agents/{data['id']}", json={"name": "x"})
+    assert resp.status_code == 409
+    assert "archived" in resp.json()["detail"]
+
+
+async def test_update_validation_422():
+    async with client() as c:
+        data = await create_agent(c)
+        resp = await c.put(f"/api/v1/agents/{data['id']}", json={"timeout_seconds": 5000})
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("status", ["draft", "archived"])
+async def test_delete_allowed_statuses(setup_test_db, status):
+    async with client() as c:
+        data = await create_agent(c)
+        await set_status(setup_test_db, data["id"], status)
+        resp = await c.delete(f"/api/v1/agents/{data['id']}")
+        assert resp.status_code == 204
+        resp = await c.get(f"/api/v1/agents/{data['id']}")
+        assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("status", ["active", "paused"])
+async def test_delete_blocked_statuses(setup_test_db, status):
+    async with client() as c:
+        data = await create_agent(c)
+        await set_status(setup_test_db, data["id"], status)
+        resp = await c.delete(f"/api/v1/agents/{data['id']}")
+    assert resp.status_code == 409
+
+
+async def test_delete_not_found():
+    async with client() as c:
+        resp = await c.delete(f"/api/v1/agents/{uuid.uuid4()}")
+    assert resp.status_code == 404

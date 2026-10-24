@@ -85,3 +85,33 @@ async def create_agent(data: AgentCreate, session: AsyncSession = Depends(get_as
 @router.get("/{agent_id}", response_model=AgentRead)
 async def get_agent(agent_id: uuid.UUID, session: AsyncSession = Depends(get_async_session)):
     return _to_read(await _get_agent(session, agent_id))
+
+
+@router.put("/{agent_id}", response_model=AgentRead)
+async def update_agent(agent_id: uuid.UUID, data: AgentUpdate, session: AsyncSession = Depends(get_async_session)):
+    agent = await _get_agent(session, agent_id)
+    if agent.status == "archived":
+        raise HTTPException(status_code=409, detail="Agent is archived; restore it before editing")
+
+    for field in ("name", "objective", "instructions", "description", "max_steps", "timeout_seconds"):
+        value = getattr(data, field)
+        if value is not None:
+            setattr(agent, field, value)
+    if data.mcp_server_ids is not None:
+        agent.mcp_servers = await _load_servers(session, data.mcp_server_ids)
+    # Changing only the server set touches no column on `agent`, so onupdate would not fire.
+    agent.updated_at = datetime.now(timezone.utc)
+
+    await session.commit()
+    await session.refresh(agent)
+    return _to_read(agent)
+
+
+@router.delete("/{agent_id}", status_code=204)
+async def delete_agent(agent_id: uuid.UUID, session: AsyncSession = Depends(get_async_session)):
+    agent = await _get_agent(session, agent_id)
+    if agent.status not in ("draft", "archived"):
+        raise HTTPException(status_code=409, detail=f"Cannot delete a {agent.status} agent; archive it first")
+    await session.delete(agent)
+    await session.commit()
+    log.info("agent_deleted", agent_id=str(agent_id))
