@@ -115,3 +115,30 @@ async def delete_agent(agent_id: uuid.UUID, session: AsyncSession = Depends(get_
     await session.delete(agent)
     await session.commit()
     log.info("agent_deleted", agent_id=str(agent_id))
+
+
+# from -> allowed targets. `archived` is terminal except for restore to draft.
+ALLOWED_TRANSITIONS: dict[str, set[str]] = {
+    "draft": {"active", "archived"},
+    "active": {"paused", "archived"},
+    "paused": {"active", "archived"},
+    "archived": {"draft"},
+}
+
+
+@router.put("/{agent_id}/status", response_model=AgentRead)
+async def set_agent_status(agent_id: uuid.UUID, data: AgentStatusUpdate, session: AsyncSession = Depends(get_async_session)):
+    agent = await _get_agent(session, agent_id)
+    target = data.status
+    if target not in ALLOWED_TRANSITIONS[agent.status]:
+        raise HTTPException(status_code=409, detail=f"Cannot move agent from {agent.status} to {target}")
+    if target == "active" and not any(s.enabled for s in agent.mcp_servers):
+        raise HTTPException(status_code=400, detail="Agent needs at least one enabled MCP server to be activated")
+
+    previous = agent.status
+    agent.status = target
+    agent.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(agent)
+    log.info("agent_status_changed", agent_id=str(agent.id), previous=previous, status=target)
+    return _to_read(agent)

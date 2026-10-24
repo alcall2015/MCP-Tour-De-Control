@@ -218,3 +218,110 @@ async def test_delete_not_found():
     async with client() as c:
         resp = await c.delete(f"/api/v1/agents/{uuid.uuid4()}")
     assert resp.status_code == 404
+
+
+# ---- status transitions --------------------------------------------------
+
+async def change(c: AsyncClient, agent_id: str, status: str):
+    return await c.put(f"/api/v1/agents/{agent_id}/status", json={"status": status})
+
+
+@pytest.mark.parametrize("start,target", [
+    ("draft", "active"),
+    ("active", "paused"),
+    ("paused", "active"),
+    ("draft", "archived"),
+    ("active", "archived"),
+    ("paused", "archived"),
+    ("archived", "draft"),
+])
+async def test_valid_transitions(setup_test_db, start, target):
+    sid = await create_server(setup_test_db, "TmLite", enabled=True)
+    async with client() as c:
+        data = await create_agent(c, mcp_server_ids=[sid])
+        await set_status(setup_test_db, data["id"], start)
+        resp = await change(c, data["id"], target)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == target
+    assert resp.json()["updated_at"] > data["updated_at"]
+
+
+@pytest.mark.parametrize("start,target", [
+    ("draft", "paused"),
+    ("draft", "draft"),
+    ("active", "draft"),
+    ("active", "active"),
+    ("paused", "draft"),
+    ("archived", "active"),
+    ("archived", "paused"),
+    ("archived", "archived"),
+])
+async def test_invalid_transitions_409(setup_test_db, start, target):
+    sid = await create_server(setup_test_db, "TmLite", enabled=True)
+    async with client() as c:
+        data = await create_agent(c, mcp_server_ids=[sid])
+        await set_status(setup_test_db, data["id"], start)
+        resp = await change(c, data["id"], target)
+    assert resp.status_code == 409
+    assert start in resp.json()["detail"] and target in resp.json()["detail"]
+
+
+async def test_activate_requires_enabled_server(setup_test_db):
+    disabled = await create_server(setup_test_db, "off", enabled=False)
+    async with client() as c:
+        no_servers = await create_agent(c)
+        resp = await change(c, no_servers["id"], "active")
+        assert resp.status_code == 400
+        assert "enabled MCP server" in resp.json()["detail"]
+
+        only_disabled = await create_agent(c, mcp_server_ids=[disabled])
+        resp = await change(c, only_disabled["id"], "active")
+        assert resp.status_code == 400
+
+
+async def test_resume_requires_enabled_server(setup_test_db):
+    disabled = await create_server(setup_test_db, "off", enabled=False)
+    async with client() as c:
+        data = await create_agent(c, mcp_server_ids=[disabled])
+        await set_status(setup_test_db, data["id"], "paused")
+        resp = await change(c, data["id"], "active")
+    assert resp.status_code == 400
+
+
+async def test_status_unknown_value_422_and_not_found():
+    async with client() as c:
+        data = await create_agent(c)
+        resp = await change(c, data["id"], "running")
+        assert resp.status_code == 422
+        resp = await change(c, str(uuid.uuid4()), "active")
+        assert resp.status_code == 404
+
+
+async def test_list_filters(setup_test_db):
+    async with client() as c:
+        a = await create_agent(c, name="a")
+        b = await create_agent(c, name="b")
+        await set_status(setup_test_db, b["id"], "archived")
+
+        default = await c.get("/api/v1/agents")
+        assert [x["name"] for x in default.json()] == ["a"]
+
+        archived = await c.get("/api/v1/agents", params={"status": "archived"})
+        assert [x["name"] for x in archived.json()] == ["b"]
+
+        drafts = await c.get("/api/v1/agents", params={"status": "draft"})
+        assert [x["name"] for x in drafts.json()] == ["a"]
+
+        bad = await c.get("/api/v1/agents", params={"status": "running"})
+        assert bad.status_code == 422
+
+
+async def test_deleting_server_removes_it_from_agent(setup_test_db):
+    sid = await create_server(setup_test_db, "TmLite")
+    async with client() as c:
+        data = await create_agent(c, mcp_server_ids=[sid])
+        resp = await c.delete(f"/api/v1/mcp-servers/{sid}")
+        assert resp.status_code == 204
+        resp = await c.get(f"/api/v1/agents/{data['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["mcp_servers"] == []
