@@ -22,7 +22,7 @@ Spec: `docs/superpowers/specs/2026-10-24-agents-crud-design.md`.
 - Code, comments, UI copy in English. No emojis in navigation.
 - Conventional Commits, e.g. `feat(agents): ...`. End commit messages with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Backend commands run from `backend/` with `venv/bin/python`; tests need the live test Postgres (`mcp_control_test`).
-- The new Alembic revision must chain on the current head. Check with `PYTHONPATH=. venv/bin/alembic heads` before writing it; at planning time the head is `0b1c2d3e4f5a` (uncommitted in the working tree). Never apply autogenerate's spurious drops (see CLAUDE.md).
+- The new Alembic revision chains on `f6a7b8c9d0e1`, the committed head of `main` and the revision the dev database is at. The working tree also holds two uncommitted revisions (`0a1b2c3d4e5f`, `0b1c2d3e4f5a`) that fork from `d4e5f6a7b8c9`; they are someone else's in-flight work, do not touch them, and because they make `alembic` report two heads, always pass an explicit revision id to `alembic upgrade` / `downgrade` instead of `head`. Never apply autogenerate's spurious drops (see CLAUDE.md).
 
 ## File Structure
 
@@ -210,7 +210,7 @@ Expected: 8 passed (3 behaviour tests + 5 parametrized constraint cases).
 
 - [ ] **Step 5: Write the migration by hand**
 
-First confirm the head: `PYTHONPATH=. venv/bin/alembic heads` → expect `0b1c2d3e4f5a (head)`. If it differs, use that value for `down_revision`.
+`PYTHONPATH=. venv/bin/alembic heads` prints two heads (`0b1c2d3e4f5a` and `f6a7b8c9d0e1`); that fork is pre-existing and out of scope. Chain on `f6a7b8c9d0e1`.
 
 Create `backend/alembic/versions/1c2d3e4f5a6b_add_agents.py`:
 
@@ -218,14 +218,14 @@ Create `backend/alembic/versions/1c2d3e4f5a6b_add_agents.py`:
 """add agents and agent_mcp_server
 
 Revision ID: 1c2d3e4f5a6b
-Revises: 0b1c2d3e4f5a
+Revises: f6a7b8c9d0e1
 """
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "1c2d3e4f5a6b"
-down_revision = "0b1c2d3e4f5a"
+down_revision = "f6a7b8c9d0e1"
 branch_labels = None
 depends_on = None
 
@@ -264,13 +264,14 @@ def downgrade():
 Run (from `backend/`, with `DATABASE_URL` pointing at the dev DB as in `.env`):
 
 ```bash
-PYTHONPATH=. venv/bin/alembic upgrade head
-PYTHONPATH=. venv/bin/alembic downgrade -1
-PYTHONPATH=. venv/bin/alembic upgrade head
-PYTHONPATH=. venv/bin/alembic heads
+PYTHONPATH=. venv/bin/alembic current
+PYTHONPATH=. venv/bin/alembic upgrade 1c2d3e4f5a6b
+PYTHONPATH=. venv/bin/alembic downgrade f6a7b8c9d0e1
+PYTHONPATH=. venv/bin/alembic upgrade 1c2d3e4f5a6b
+PYTHONPATH=. venv/bin/alembic current
 ```
 
-Expected: no errors, last line `1c2d3e4f5a6b (head)`.
+Expected: first `current` prints `f6a7b8c9d0e1`, no errors, last `current` prints `1c2d3e4f5a6b`. `alembic heads` will list `1c2d3e4f5a6b` and `0b1c2d3e4f5a`; the second is the pre-existing fork.
 
 - [ ] **Step 7: Commit**
 
