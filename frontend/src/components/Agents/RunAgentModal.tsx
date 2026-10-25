@@ -55,7 +55,7 @@ export function RunAgentModal({ open, agent, onClose }: Props) {
         <div className="flex justify-end gap-3 pt-1">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary" disabled={!objective.trim() || mutation.isPending}>
-            {mutation.isPending ? "Starting..." : "Start"}
+            {mutation.isPending ? "Starting…" : "Start"}
           </button>
         </div>
       </form>

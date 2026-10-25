@@ -105,7 +105,7 @@ export function AgentCard({ agent, busy, error, onEdit, onStatus, onDelete, onRu
           <span>No runs yet</span>
         )}
         {agent.last_task && (
-          <button type="button" className="ml-auto underline-offset-2 hover:underline" style={{ color: "var(--text-secondary)" }} onClick={() => setShowTasks((v) => !v)}>
+          <button type="button" className="ml-auto underline-offset-2 hover:underline" style={{ color: "var(--text-secondary)" }} aria-expanded={showTasks} onClick={() => setShowTasks((v) => !v)}>
             {showTasks ? "Hide recent tasks" : "Recent tasks"}
           </button>
         )}

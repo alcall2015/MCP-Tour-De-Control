@@ -314,7 +314,7 @@ same SSE reader the chat uses. `Agent` gains `cron_expr`, `running_task_id`,
   success navigates to the task page.
 - While a task runs the card shows a `Running` badge, a `Cancel` button and a
   link to the task.
-- Last task summary (status, outcome, relative time) and a `Tasks (N)` toggle
+- Last task summary (status, outcome, relative time) and a `Recent tasks` toggle (the API exposes no per-agent count)
   that expands the five most recent tasks, each linking to its page.
 
 ### Agent form

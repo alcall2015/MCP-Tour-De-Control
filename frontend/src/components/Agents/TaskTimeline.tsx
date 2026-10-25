@@ -21,7 +21,7 @@ function ToolCallBody({ payload }: { payload: Record<string, unknown> }) {
   const result = pretty(payload.result);
   return (
     <div className="rounded-lg text-xs" style={{ border: `1px solid ${ok ? "rgba(96, 165, 250, 0.25)" : "rgba(248, 113, 113, 0.35)"}`, backgroundColor: ok ? "rgba(96, 165, 250, 0.05)" : "rgba(248, 113, 113, 0.06)" }}>
-      <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left" onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span style={{ color: ok ? "var(--running)" : "var(--error)" }}>{ok ? "Called" : "Failed"}</span>
         <code className="font-mono" style={{ color: "var(--accent)" }}>{String(payload.tool)}</code>
         {payload.server ? <span style={{ color: "var(--text-muted)" }}>on {String(payload.server)}</span> : null}
@@ -42,7 +42,7 @@ function PromptDisclosure({ taskId, seq }: { taskId: string; seq: number }) {
   const { data, isLoading, error } = useQuery({ queryKey: ["agent-task-step", taskId, seq], queryFn: () => getAgentTaskStep(taskId, seq), enabled: open });
   return (
     <div>
-      <button type="button" className="text-xs underline-offset-2 hover:underline" style={{ color: "var(--text-secondary)" }} onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="text-xs underline-offset-2 hover:underline" style={{ color: "var(--text-secondary)" }} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         {open ? "Hide prompt" : "Show prompt"}
       </button>
       {open && (
