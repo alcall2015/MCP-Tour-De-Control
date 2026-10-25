@@ -3,12 +3,12 @@
 
 /* ─── Design Tokens ───────────────────────────────────────────── */
 :root {
-  --bg-void:        #080b12;
-  --bg-panel:       #0f1320;
-  --bg-elevated:    #171d2e;
-  --border:         #1e2740;
-  --accent:         #e2b340;
-  --accent-hover:   #f0cc60;
+  --bg-void:        #090d16;
+  --bg-panel:       #101723;
+  --bg-elevated:    #182232;
+  --border:         #273448;
+  --accent:         #c9f264;
+  --accent-hover:   #dcff89;
   --success:        #34d399;
   --error:          #f87171;
   --warning:        #fbbf24;
@@ -16,6 +16,22 @@
   --text-primary:   #e2e8f0;
   --text-secondary: #94a3b8;
   --text-muted:     #64748b;
+}
+
+:root[data-theme="light"] {
+  --bg-void: #f4f7fb;
+  --bg-panel: #ffffff;
+  --bg-elevated: #edf2f7;
+  --border: #d8e0ea;
+  --accent: #537d00;
+  --accent-hover: #3f6200;
+  --success: #14835e;
+  --error: #c7354d;
+  --warning: #a35b00;
+  --running: #2563eb;
+  --text-primary: #172335;
+  --text-secondary: #536276;
+  --text-muted: #748196;
 }
 
 /* ─── Base ────────────────────────────────────────────────────── */
@@ -28,7 +44,7 @@ body {
   background-color: var(--bg-void);
   background-image: radial-gradient(
     ellipse 80% 60% at 0% 0%,
-    rgba(226, 179, 64, 0.04) 0%,
+    rgba(201, 242, 100, 0.055) 0%,
     transparent 60%
   );
   background-attachment: fixed;
@@ -39,6 +55,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+:root[data-theme="light"] body { background-image: radial-gradient(ellipse 70% 55% at 0% 0%, rgba(120, 179, 22, .09), transparent 60%); }
 
 /* ─── Typography ──────────────────────────────────────────────── */
 .font-display {
@@ -210,3 +227,22 @@ body {
 
 /* Compact variant for row actions; declared after the base button rules so it wins at equal specificity. */
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.75rem; }
+
+/* ─── Application shell / navigation ─────────────────────────── */
+.app-frame { min-height: 100vh; }
+.control-sidebar { position: fixed; inset: 0 auto 0 0; width: 272px; z-index: 30; display: flex; flex-direction: column; padding: 28px 14px 18px; background: linear-gradient(165deg, #121c2a 0%, #0c121d 60%, #090d16 100%); border-right: 1px solid var(--border); }
+:root[data-theme="light"] .control-sidebar { background: linear-gradient(165deg, #ffffff 0%, #f1f5f9 68%, #e8eef5 100%); }
+.control-brand { display: flex; align-items: flex-start; gap: 12px; padding: 2px 12px 31px; }
+.brand-mark { position: relative; width: 33px; height: 33px; flex: 0 0 auto; display: grid; place-content: center; gap: 3px; padding: 7px; border: 1px solid rgba(201,242,100,.55); border-radius: 10px; box-shadow: 0 0 24px rgba(201,242,100,.12); }
+.brand-mark span { display: block; height: 2px; background: var(--accent); border-radius: 3px; transform: skewX(-28deg); }
+.brand-mark span:nth-child(1) { width: 10px; margin-left: 4px; }.brand-mark span:nth-child(2) { width: 15px; }.brand-mark span:nth-child(3) { width: 7px; margin-left: 7px; }
+.control-brand p, .control-brand h1 { margin: 0; }.control-brand p { color: var(--text-muted); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .16em; line-height: 1.2; }.control-brand h1 { font-family: "Space Grotesk", sans-serif; color: #edf5ff; font-size: 18px; font-weight: 500; line-height: 1.03; letter-spacing: -.045em; }.control-brand h1 strong { color: var(--accent); font-weight: 600; }
+.nav-caption { padding: 0 13px 9px; color: #718097; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.nav-caption-spaced { margin-top: 17px; }
+.control-nav { display: grid; gap: 3px; }
+.control-nav-link { position: relative; display: flex; gap: 11px; align-items: center; padding: 10px 12px; border: 1px solid transparent; border-radius: 9px; color: var(--text-secondary); transition: .18s ease; text-decoration: none; }.control-nav-link:hover { color: #f1f6fb; background: rgba(255,255,255,.035); }.control-nav-link.active { color: #f6ffe1; background: linear-gradient(90deg, rgba(201,242,100,.16), rgba(201,242,100,.04)); border-color: rgba(201,242,100,.18); box-shadow: inset 3px 0 var(--accent); }.nav-icon { display: grid; place-items: center; width: 23px; height: 23px; }.nav-icon svg { width: 19px; height: 19px; }.control-nav-link strong, .control-nav-link small { display: block; }.control-nav-link strong { font-size: 13px; line-height: 1.15; font-weight: 600; }.control-nav-link small { margin-top: 3px; font-size: 10px; color: #718097; line-height: 1; }.control-nav-link.active small { color: rgba(222,243,182,.66); }:root[data-theme="light"] .control-nav-link:hover { color: var(--text-primary); background: rgba(23,35,53,.045); }:root[data-theme="light"] .control-nav-link.active { color: #213404; background: linear-gradient(90deg, rgba(83,125,0,.16), rgba(83,125,0,.055)); border-color: rgba(83,125,0,.28); }:root[data-theme="light"] .control-nav-link.active small { color: #587420; }
+.sidebar-bottom { margin-top: auto; padding: 16px 7px 0; }.theme-toggle { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-secondary); background: rgba(255,255,255,.035); font: 600 11px "Inter", sans-serif; cursor: pointer; }.theme-toggle:hover { border-color: rgba(201,242,100,.6); color: var(--text-primary); }.theme-toggle > span:first-child { color: var(--accent); font-size: 15px; line-height: 1; }.theme-toggle i { width: 20px; height: 12px; margin-left: auto; border-radius: 20px; background: #4a596d; }.theme-toggle i::after { display: block; width: 8px; height: 8px; margin: 2px; border-radius: 50%; background: #e7edf5; content: ""; transition: transform .2s ease; }:root[data-theme="light"] .theme-toggle i { background: var(--accent); }:root[data-theme="light"] .theme-toggle i::after { transform: translateX(8px); }.system-status { padding: 14px 12px; background: rgba(2,7,14,.34); border: 1px solid rgba(111,137,162,.22); border-radius: 10px; }.system-status-title { display: block; margin-bottom: 10px; color: #8392a7; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }.system-status-line { display: flex; align-items: center; gap: 7px; color: #9baabd; font-size: 11px; line-height: 1.9; }.system-status-line i { width: 6px; height: 6px; border-radius: 50%; background: #536175; }.system-status-line i.is-live { background: var(--success); box-shadow: 0 0 8px var(--success); }.system-status-line i.is-warm { background: var(--accent); box-shadow: 0 0 8px var(--accent); }.system-status-line b { margin-left: auto; color: #e8eef6; font-family: "JetBrains Mono", monospace; font-size: 11px; }.ava-link { display: flex; justify-content: space-between; margin: 11px 4px 0; color: #96a5b7; font-size: 11px; text-decoration: none; }.ava-link:hover { color: var(--accent); }.ava-link span { color: var(--accent); }:root[data-theme="light"] .system-status { background: rgba(255,255,255,.58); }:root[data-theme="light"] .system-status-line, :root[data-theme="light"] .ava-link { color: var(--text-secondary); }:root[data-theme="light"] .system-status-line b { color: var(--text-primary); }
+.app-main { min-height: 100vh; margin-left: 272px; padding: 42px clamp(28px, 5vw, 80px) 60px; max-width: 1580px; }
+.page-context { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin: 0 0 34px; }.page-context span { color: var(--accent); font: 700 10px "Inter", sans-serif; text-transform: uppercase; letter-spacing: .14em; }.page-context h2 { margin: 5px 0 3px; color: var(--text-primary); font: 600 clamp(27px, 3vw, 35px) "Space Grotesk", sans-serif; letter-spacing: -.05em; }.page-context p { margin: 0; color: var(--text-secondary); font-size: 13px; }.page-context-status { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; color: var(--text-secondary); font-size: 11px; }.page-context-status i { width: 7px; height: 7px; background: var(--success); border-radius: 50%; box-shadow: 0 0 9px var(--success); }
+.mobile-control-header, .mobile-control-nav { display: none; }
+@media (max-width: 900px) { .control-sidebar { display: none; }.app-main { margin-left: 0; padding: 30px 24px 94px; }.page-context { align-items: start; margin-bottom: 27px; }.page-context-status { display: none; }.mobile-control-header { display: flex; align-items: center; gap: 10px; height: 61px; padding: 0 20px; position: sticky; top: 0; z-index: 20; background: rgba(9,13,22,.92); backdrop-filter: blur(15px); border-bottom: 1px solid var(--border); font-family: "Space Grotesk", sans-serif; font-weight: 600; }.mobile-control-header .brand-mark { width: 28px; height: 28px; padding: 6px; border-radius: 8px; }.mobile-control-header .theme-toggle { width: auto; margin: 0 0 0 auto; padding: 7px; border: 0; background: transparent; }.mobile-control-header .theme-toggle > span:last-of-type, .mobile-control-header .theme-toggle i { display: none; }.mobile-control-nav { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; padding: 9px 8px env(safe-area-inset-bottom); background: rgba(12,18,29,.96); backdrop-filter: blur(15px); border-top: 1px solid var(--border); }.mobile-control-nav a, .mobile-control-nav button { display: grid; justify-items: center; gap: 3px; min-width: 0; padding: 0; color: #7e8da0; border: 0; background: transparent; font: 9px "Inter", sans-serif; text-decoration: none; }.mobile-control-nav svg { width: 19px; height: 19px; }.mobile-control-nav a.active, .mobile-control-nav button.active { color: var(--accent); }.more-icon { height: 19px; font-size: 16px; line-height: 11px; letter-spacing: 1px; }.mobile-more-menu { position: fixed; right: 12px; bottom: 64px; z-index: 30; display: grid; width: min(260px, calc(100vw - 24px)); gap: 3px; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 16px 38px rgba(0,0,0,.25); }.mobile-more-menu .control-nav-link { padding: 9px; }.mobile-more-menu .nav-icon { display: grid; }.external-arrow { margin-left: auto; color: var(--accent); } :root[data-theme="light"] .mobile-control-header, :root[data-theme="light"] .mobile-control-nav { background: rgba(255,255,255,.94); } }
