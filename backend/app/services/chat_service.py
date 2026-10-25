@@ -28,15 +28,17 @@ MAX_HISTORY = 20
 MAX_TOOL_RESULT_LEN = 2000
 MAX_TOOL_ROUNDS = 8
 
-# Fields not supported by all LLM providers in function calling schemas
-_UNSUPPORTED_SCHEMA_FIELDS = {"default", "additionalProperties", "anyOf", "title"}
+# Keep only the portable JSON Schema subset accepted by every configured
+# function-calling provider.  In particular, Gemini rejects validation and
+# metadata keywords such as `$schema`, `minimum`, and `additionalProperties`.
+_FUNCTION_SCHEMA_FIELDS = {"type", "description", "properties", "required", "items", "enum"}
 
 
 def _clean_schema(schema: dict) -> dict:
-    """Strip fields unsupported by LLM function calling (e.g. Google Gemini rejects 'default')."""
+    """Reduce an MCP schema to portable LLM function-calling fields."""
     cleaned = {}
     for k, v in schema.items():
-        if k in _UNSUPPORTED_SCHEMA_FIELDS:
+        if k not in _FUNCTION_SCHEMA_FIELDS:
             continue
         if isinstance(v, dict):
             cleaned[k] = _clean_schema(v)
@@ -44,6 +46,16 @@ def _clean_schema(schema: dict) -> dict:
             cleaned[k] = [_clean_schema(i) if isinstance(i, dict) else i for i in v]
         else:
             cleaned[k] = v
+
+    # A property can have been removed above when it was expressed through a
+    # JSON Schema reference.  Gemini rejects a `required` entry without a
+    # matching property definition.
+    properties = cleaned.get("properties")
+    if "required" in cleaned:
+        if isinstance(properties, dict):
+            cleaned["required"] = [name for name in cleaned["required"] if name in properties]
+        else:
+            cleaned.pop("required")
     return cleaned
 
 
