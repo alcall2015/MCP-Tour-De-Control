@@ -1,20 +1,26 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models import SmsReply
-from app.schemas.sms_reply import SmsAutoReplyStats, SmsReplyRead
+from app.schemas.sms_reply import SmsAutoReplyStats, SmsReplyPage
 from app.services.sms_auto_reply_service import SmsAutoReplyService
 
 router = APIRouter(prefix="/api/v1/sms-autoreply", tags=["sms-autoreply"])
 
 
-@router.get("/replies", response_model=list[SmsReplyRead])
-async def list_replies(session: AsyncSession = Depends(get_async_session)):
-    return list((await session.execute(
-        select(SmsReply).order_by(SmsReply.created_at.desc()).limit(100)
+@router.get("/replies", response_model=SmsReplyPage)
+async def list_replies(
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_async_session),
+):
+    total = (await session.execute(select(func.count()).select_from(SmsReply))).scalar_one()
+    items = list((await session.execute(
+        select(SmsReply).order_by(SmsReply.created_at.desc()).limit(limit).offset(offset)
     )).scalars())
+    return SmsReplyPage(items=items, total=total)
 
 
 @router.get("/stats", response_model=SmsAutoReplyStats)

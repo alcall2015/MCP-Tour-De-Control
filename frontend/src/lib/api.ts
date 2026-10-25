@@ -58,7 +58,12 @@ export const previewSimPairConversation = () => request<SimPairConversationRun>(
 export const runSimPairCalls = () => request<SimPairCallRun>("/sim-pairing/calls/run", { method: "POST" });
 
 // SMS auto-reply
-export const listSmsReplies = () => request<SmsReply[]>("/sms-autoreply/replies");
+export const listSmsReplies = (params: { limit?: number; offset?: number } = {}) => {
+  const query = new URLSearchParams();
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.offset) query.set("offset", String(params.offset));
+  return request<SmsReplyPage>(`/sms-autoreply/replies?${query}`);
+};
 export const getSmsAutoReplyStats = () => request<SmsAutoReplyStats>("/sms-autoreply/stats");
 export const runSmsAutoReply = () => request<SmsAutoReplyRun>("/sms-autoreply/run", { method: "POST" });
 export const previewSmsAutoReply = () => request<SmsAutoReplyRun>("/sms-autoreply/preview", { method: "POST" });
@@ -238,6 +243,7 @@ export interface SimPairCount { active: number; archived: number; }
 export interface SimPairConversationRun { sent: number; skipped: number; failed: number; held?: number; active_pairs?: number; queued?: number; overdue?: number; pairs_under_target?: number; reason?: string; previews?: { pair_id: string; from_sim_id: number; to_sim_id: number; content: string }[]; }
 export interface SmsReply { id: string; trigger_kind: string; trigger_ref: string; sim_id: number; to_number: string; whatsapp_number: string | null; content: string; status: string; error: string | null; sent_at: string | null; created_at: string; }
 export interface SmsAutoReplyStats { sent: number; failed: number; skipped: number; sending: number; last_sent_at: string | null; }
+export interface SmsReplyPage { items: SmsReply[]; total: number; }
 export interface SmsAutoReplyPreview { kind: string; to_number: string; whatsapp: string | null; content: string | null; skip_reason: string | null; }
 export interface SmsAutoReplyRun { sent: number; skipped: number; failed: number; reason?: string; previews?: SmsAutoReplyPreview[]; }
 export interface Prompt {

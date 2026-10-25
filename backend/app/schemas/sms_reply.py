@@ -20,6 +20,11 @@ class SmsReplyRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SmsReplyPage(BaseModel):
+    items: list[SmsReplyRead]
+    total: int
+
+
 class SmsAutoReplyStats(BaseModel):
     sent: int
     failed: int

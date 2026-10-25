@@ -3,6 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConfig, getSmsAutoReplyStats, listSmsReplies, previewSmsAutoReply, runSmsAutoReply, updateConfig } from "../lib/api";
 import { Spinner } from "../components/ui/Spinner";
 
+const HISTORY_PAGE_SIZE = 25;
+
+const AUTO_REPLY_RISK_NOTICE = (
+  <div className="rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: "rgba(251, 191, 36, 0.35)", backgroundColor: "rgba(251, 191, 36, 0.08)", color: "var(--warning)" }}>
+    <strong>Automation risk notice.</strong> Unattended activity involving newly activated SIMs can be statistically implausible in legitimate use. In particular, a new SIM A calling or messaging a new SIM B within the same 60-minute window is estimated below 0.1% likely to be legitimate. Enable only with documented authorisation and verified source-SIM routing.
+  </div>
+);
+
 export function SmsAutoReplyPage() {
   const queryClient = useQueryClient();
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -10,10 +18,15 @@ export function SmsAutoReplyPage() {
   const [maxPerRun, setMaxPerRun] = useState<number | null>(null);
   const [lookbackMinutes, setLookbackMinutes] = useState<number | null>(null);
   const [cooldownHours, setCooldownHours] = useState<number | null>(null);
+  const [historyPage, setHistoryPage] = useState(0);
 
   const { data: config } = useQuery({ queryKey: ["config"], queryFn: getConfig });
   const { data: stats } = useQuery({ queryKey: ["sms-autoreply-stats"], queryFn: getSmsAutoReplyStats, refetchInterval: 30000 });
-  const { data: replies = [], isLoading } = useQuery({ queryKey: ["sms-autoreply-replies"], queryFn: listSmsReplies, refetchInterval: 30000 });
+  const { data: repliesPage, isLoading } = useQuery({ queryKey: ["sms-autoreply-replies", historyPage], queryFn: () => listSmsReplies({ limit: HISTORY_PAGE_SIZE, offset: historyPage * HISTORY_PAGE_SIZE }), refetchInterval: 30000 });
+  const replies = repliesPage?.items ?? [];
+  const repliesTotal = repliesPage?.total ?? 0;
+  const historyStart = repliesTotal === 0 ? 0 : historyPage * HISTORY_PAGE_SIZE + 1;
+  const historyEnd = Math.min(repliesTotal, (historyPage + 1) * HISTORY_PAGE_SIZE);
 
   const configMut = useMutation({
     mutationFn: updateConfig,
@@ -73,6 +86,7 @@ export function SmsAutoReplyPage() {
           <label className="flex items-center gap-3 text-sm" style={{ color: "var(--text-primary)" }}>
             <input type="checkbox" checked={activeEnabled} onChange={(event) => setEnabled(event.target.checked)} /> Enable SMS auto-reply
           </label>
+          {AUTO_REPLY_RISK_NOTICE}
           <p className="text-xs" style={{ color: "var(--warning)" }}>
             Once enabled, this runs unattended every 15 minutes and sends real SMS to numbers outside the fleet on its own — no further action needed, and "Run now" is not required to trigger it.
           </p>
@@ -85,7 +99,7 @@ export function SmsAutoReplyPage() {
               className="input mt-1 w-full"
               placeholder="e.g. Salut, j'essaye de te joindre. Ecris-moi sur WhatsApp au {whatsapp}."
             />
-            <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>Use {"{whatsapp}"} to insert the WhatsApp number. Identical text is sent to every recipient.</span>
+            <span className="mt-1 block text-xs" style={{ color: "var(--text-muted)" }}>Use {"{whatsapp}"} to insert the WhatsApp number. Separate alternatives with a line containing ---; one is chosen at random for each recipient.</span>
           </label>
           <label className="text-sm" style={{ color: "var(--text-secondary)" }}>
             Maximum replies per run
@@ -180,7 +194,7 @@ export function SmsAutoReplyPage() {
           </p>
         )}
 
-        <p className="mt-5 text-sm" style={{ color: "var(--text-secondary)" }}>Last 100 replies.</p>
+        <div className="mt-5 flex items-center justify-between gap-4"><p className="text-sm" style={{ color: "var(--text-secondary)" }}>Reply history — 25 records per page.</p>{repliesTotal > 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>{historyStart}–{historyEnd} of {repliesTotal}</span>}</div>
         {isLoading ? (
           <div className="flex justify-center py-8"><Spinner /></div>
         ) : replies.length === 0 ? (
@@ -218,6 +232,7 @@ export function SmsAutoReplyPage() {
             ))}
           </div>
         )}
+        {repliesTotal > 0 && <div className="mt-5 flex items-center justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setHistoryPage((page) => Math.max(0, page - 1))} disabled={historyPage === 0}>Previous</button><button type="button" className="btn-secondary" onClick={() => setHistoryPage((page) => page + 1)} disabled={historyEnd >= repliesTotal}>Next</button></div>}
       </div>
     </div>
   );
