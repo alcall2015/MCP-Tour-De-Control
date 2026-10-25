@@ -105,6 +105,15 @@ async def _execute_sim_pair_calls():
         log.error("SIM pair call run failed", error=str(exc))
 
 
+async def _execute_agent_cron(agent_id: str):
+    """Cron tick for one agent: enqueue a task (the worker runs it)."""
+    from app.services.agent_service import AgentService
+    try:
+        await AgentService.enqueue_from_cron(uuid.UUID(agent_id))
+    except Exception as exc:
+        log.error("Agent cron tick failed", agent_id=agent_id, error=str(exc))
+
+
 class SchedulerService:
     def __init__(self, use_db_jobstore: bool = True):
         jobstores = {}
@@ -171,6 +180,25 @@ class SchedulerService:
         except Exception:
             log.warning("Job not found for reschedule, adding instead", job_id=job_id)
             self.add_job(prompt_id, cron_expr)
+
+    # ---- per-agent cron jobs (enqueue only; the worker executes) ----
+    def add_agent_job(self, agent_id: uuid.UUID, cron_expr: str):
+        job_id = f"agent_{agent_id}"
+        self.scheduler.add_job(_execute_agent_cron, trigger=CronTrigger.from_crontab(cron_expr),
+                               id=job_id, args=[str(agent_id)], replace_existing=True)
+        log.info("Agent job added", job_id=job_id, cron=cron_expr)
+
+    def remove_agent_job(self, agent_id: uuid.UUID):
+        try:
+            self.scheduler.remove_job(f"agent_{agent_id}")
+        except Exception:
+            log.debug("Agent job not found for removal", agent_id=str(agent_id))
+
+    def reschedule_agent_job(self, agent_id: uuid.UUID, cron_expr: str):
+        try:
+            self.scheduler.reschedule_job(f"agent_{agent_id}", trigger=CronTrigger.from_crontab(cron_expr))
+        except Exception:
+            self.add_agent_job(agent_id, cron_expr)
 
     ACTIVITY_JOB_ID = "activity_scan"
     PAIRING_JOB_ID = "sim_pairing_sync"

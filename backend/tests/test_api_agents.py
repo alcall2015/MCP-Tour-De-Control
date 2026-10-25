@@ -336,3 +336,16 @@ async def test_deleting_server_removes_it_from_agent(setup_test_db):
         resp = await c.get(f"/api/v1/agents/{data['id']}")
     assert resp.status_code == 200
     assert resp.json()["mcp_servers"] == []
+
+
+# ---- cron and task summary fields -----------------------------------------
+
+async def test_create_with_invalid_cron_is_422_and_valid_cron_round_trips():
+    async with client() as c:
+        resp = await c.post("/api/v1/agents", json={"name": "x", "objective": "y", "mcp_server_ids": [], "cron_expr": "not a cron"})
+        assert resp.status_code == 422
+        data = await create_agent(c, cron_expr="0 8 * * *")
+        assert data["cron_expr"] == "0 8 * * *"
+        assert data["running_task_id"] is None and data["last_task"] is None
+        resp = await c.put(f"/api/v1/agents/{data['id']}", json={"cron_expr": None})
+        assert resp.status_code == 200 and resp.json()["cron_expr"] is None

@@ -46,6 +46,16 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.error("Failed to restore cron jobs from DB", error=str(exc))
 
+    # Restore per-agent cron jobs
+    try:
+        async with async_session() as session:
+            from app.models import Agent
+            result = await session.execute(select(Agent).where(Agent.status == "active", Agent.cron_expr.isnot(None)))
+            for agent in result.scalars().all():
+                scheduler_service.add_agent_job(agent.id, agent.cron_expr)
+    except Exception as exc:
+        log.error("Failed to restore agent cron jobs", error=str(exc))
+
     # Schedule the daily activity scan from the stored cron expression
     try:
         async with async_session() as session:

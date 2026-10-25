@@ -10,12 +10,15 @@ from app.database import get_async_session
 from app.models import Agent, McpServer
 from app.schemas import AgentCreate, AgentRead, AgentServerRef, AgentStatusUpdate, AgentUpdate
 from app.schemas.agent import AgentStatus
+from app.services.agent_service import AgentService, AgentStateError
+from app.services.scheduler_service import scheduler_service
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 
 
-def _to_read(agent: Agent) -> AgentRead:
+def _to_read(agent: Agent, summary: dict | None = None) -> AgentRead:
+    summary = summary or {}
     return AgentRead(
         id=agent.id,
         name=agent.name,
@@ -28,6 +31,9 @@ def _to_read(agent: Agent) -> AgentRead:
         created_at=agent.created_at,
         updated_at=agent.updated_at,
         mcp_servers=[AgentServerRef(id=s.id, name=s.name, enabled=s.enabled) for s in agent.mcp_servers],
+        cron_expr=agent.cron_expr,
+        running_task_id=summary.get("running_task_id"),
+        last_task=summary.get("last_task"),
     )
 
 
@@ -60,7 +66,8 @@ async def list_agents(
     else:
         stmt = stmt.where(Agent.status == status)
     agents = (await session.execute(stmt)).scalars().all()
-    return [_to_read(a) for a in agents]
+    summaries = await AgentService.task_summaries(session, [a.id for a in agents])
+    return [_to_read(a, summaries[a.id]) for a in agents]
 
 
 @router.post("", response_model=AgentRead, status_code=201)
@@ -74,6 +81,7 @@ async def create_agent(data: AgentCreate, session: AsyncSession = Depends(get_as
         max_steps=data.max_steps,
         timeout_seconds=data.timeout_seconds,
         mcp_servers=servers,
+        cron_expr=data.cron_expr,
     )
     session.add(agent)
     await session.commit()
@@ -84,28 +92,19 @@ async def create_agent(data: AgentCreate, session: AsyncSession = Depends(get_as
 
 @router.get("/{agent_id}", response_model=AgentRead)
 async def get_agent(agent_id: uuid.UUID, session: AsyncSession = Depends(get_async_session)):
-    return _to_read(await _get_agent(session, agent_id))
+    agent = await _get_agent(session, agent_id)
+    summary = (await AgentService.task_summaries(session, [agent.id]))[agent.id]
+    return _to_read(agent, summary)
 
 
 @router.put("/{agent_id}", response_model=AgentRead)
 async def update_agent(agent_id: uuid.UUID, data: AgentUpdate, session: AsyncSession = Depends(get_async_session)):
     agent = await _get_agent(session, agent_id)
-    if agent.status == "archived":
-        raise HTTPException(status_code=409, detail="Agent is archived; restore it before editing")
-
-    for field in ("name", "objective", "instructions", "description", "max_steps", "timeout_seconds"):
-        value = getattr(data, field)
-        if value is not None:
-            setattr(agent, field, value)
-    if data.mcp_server_ids is not None:
-        agent.mcp_servers = await _load_servers(session, data.mcp_server_ids)
-    # Changing only the server set touches no column on `agent`, so onupdate would not fire.
-    agent.updated_at = datetime.now(timezone.utc)
-
-    await session.commit()
-    await session.refresh(agent)
-    log.info("agent_updated", agent_id=str(agent.id), fields=[f for f in data.model_fields_set])
-    return _to_read(agent)
+    try:
+        agent = await AgentService.apply_update(session, agent, data, lambda ids: _load_servers(session, ids))
+    except AgentStateError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    return _to_read(agent, (await AgentService.task_summaries(session, [agent.id]))[agent.id])
 
 
 @router.delete("/{agent_id}", status_code=204)
@@ -115,31 +114,15 @@ async def delete_agent(agent_id: uuid.UUID, session: AsyncSession = Depends(get_
         raise HTTPException(status_code=409, detail=f"Cannot delete a {agent.status} agent; archive it first")
     await session.delete(agent)
     await session.commit()
+    scheduler_service.remove_agent_job(agent_id)
     log.info("agent_deleted", agent_id=str(agent_id))
-
-
-# from -> allowed targets. `archived` is terminal except for restore to draft.
-ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "draft": {"active", "archived"},
-    "active": {"paused", "archived"},
-    "paused": {"active", "archived"},
-    "archived": {"draft"},
-}
 
 
 @router.put("/{agent_id}/status", response_model=AgentRead)
 async def set_agent_status(agent_id: uuid.UUID, data: AgentStatusUpdate, session: AsyncSession = Depends(get_async_session)):
     agent = await _get_agent(session, agent_id)
-    target = data.status
-    if target not in ALLOWED_TRANSITIONS[agent.status]:
-        raise HTTPException(status_code=409, detail=f"Cannot move agent from {agent.status} to {target}")
-    if target == "active" and not any(s.enabled for s in agent.mcp_servers):
-        raise HTTPException(status_code=400, detail="Agent needs at least one enabled MCP server to be activated")
-
-    previous = agent.status
-    agent.status = target
-    agent.updated_at = datetime.now(timezone.utc)
-    await session.commit()
-    await session.refresh(agent)
-    log.info("agent_status_changed", agent_id=str(agent.id), previous=previous, status=target)
-    return _to_read(agent)
+    try:
+        agent = await AgentService.change_status(session, agent, data.status)
+    except AgentStateError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    return _to_read(agent, (await AgentService.task_summaries(session, [agent.id]))[agent.id])
