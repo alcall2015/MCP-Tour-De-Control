@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     # guaranteed to have the generated scripts' dependencies installed.
     SCRIPT_PYTHON: str = ""
 
+    # Agent execution worker
+    AGENT_WORKER_CONCURRENCY: int = 2
+    AGENT_TASK_HEARTBEAT_SECONDS: int = 15
+    AGENT_TASK_STALE_SECONDS: int = 90
+    AGENT_TASK_FINAL_GRACE_SECONDS: int = 90
+
     model_config = {"env_file": ".env"}
 
 

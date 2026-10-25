@@ -10,5 +10,6 @@ from app.models.sim_pairing import SimPairingGroup, SimPair, SimPairHistory, Sim
 from app.models.document import TrackedDocument, DocumentContent, DocumentActivity
 from app.models.sms_reply import SmsReply
 from app.models.agent import Agent
+from app.models.agent_task import AgentTask, AgentTaskStep
 
-__all__ = ["Base", "Config", "McpServer", "Prompt", "Script", "Execution", "StressTest", "StressTestMetrics", "Conversation", "ChatMessage", "SimPairingGroup", "SimPairingTopic", "SimPairingSim", "SimPair", "SimPairHistory", "SimPairMessage", "SimPairMessageQueue", "SimPairCall", "SimPairingRun", "TrackedDocument", "DocumentContent", "DocumentActivity", "SmsReply", "Agent"]
+__all__ = ["Base", "Config", "McpServer", "Prompt", "Script", "Execution", "StressTest", "StressTestMetrics", "Conversation", "ChatMessage", "SimPairingGroup", "SimPairingTopic", "SimPairingSim", "SimPair", "SimPairHistory", "SimPairMessage", "SimPairMessageQueue", "SimPairCall", "SimPairingRun", "TrackedDocument", "DocumentContent", "DocumentActivity", "SmsReply", "Agent", "AgentTask", "AgentTaskStep"]
