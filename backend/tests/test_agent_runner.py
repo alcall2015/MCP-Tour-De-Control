@@ -271,7 +271,7 @@ async def test_finish_is_skipped_when_task_already_final(setup_db, session):
     assert task.report is None
 
 
-async def test_grace_exhausted_fails_in_report_phase(setup_db, session):
+async def test_grace_exhausted_before_critique_fails_in_critique_phase(setup_db, session):
     task = await setup(session, timeout=10)
     now = [0.0]
 
@@ -284,3 +284,45 @@ async def test_grace_exhausted_fails_in_report_phase(setup_db, session):
                    session_factory=factory, clock=lambda: now[0])
     await session.refresh(task)
     assert task.status == "failed" and task.error.startswith("critique")
+
+
+async def test_undeclared_criteria_do_not_count(setup_db, session):
+    """A criterion the plan never declared cannot lift the outcome."""
+    task = await setup(session)
+    critique = {"criteria": [
+        {"id": "c1", "met": False, "confidence": 0.9, "justification": "no"},
+        {"id": "c2", "met": False, "confidence": 0.9, "justification": "no"},
+        {"id": "invented", "met": True, "confidence": 1.0, "justification": "made up"},
+    ]}
+    llm = scripted(J(PLAN), LlmResult("done", []), J(critique), J(REPORT))
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    await run_task(task.id, llm=llm, tool=fake_tool, tool_defs=fake_tool_defs, session_factory=factory)
+    await session.refresh(task)
+    assert task.status == "completed" and task.outcome == "failed"
+    assert [c["id"] for c in task.critique["criteria"]] == ["c1", "c2"]
+
+
+async def test_cancel_requested_during_final_phases_cancels(setup_db, session):
+    """A cancel arriving while the critique call is in flight is still honoured."""
+    task = await setup(session)
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+
+    calls = []
+
+    async def llm(provider, model, api_key, messages, tools):
+        calls.append(len(calls))
+        if len(calls) == 1:
+            return J(PLAN)
+        if len(calls) == 2:
+            return LlmResult("nothing to do", [])
+        if len(calls) == 3:
+            # the critique call: the operator cancels while we are answering
+            async with factory() as s:
+                await AgentTaskService.request_cancel(s, await s.get(AgentTask, task.id))
+            return J(CRITIQUE)
+        return J(REPORT)
+
+    await run_task(task.id, llm=llm, tool=fake_tool, tool_defs=fake_tool_defs, session_factory=factory)
+    await session.refresh(task)
+    assert task.status == "cancelled" and task.outcome is None
+    assert len(calls) == 3 and task.report is None     # the report phase never ran

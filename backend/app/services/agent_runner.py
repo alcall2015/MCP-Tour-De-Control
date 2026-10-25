@@ -17,6 +17,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import async_session
 from app.models import Agent, AgentTask, Config
+from app.models.agent_task import OPEN_STATUSES
 from app.services.agent_task_service import AgentTaskService
 from app.services.llm_runtime import LlmResult, build_tool_defs, call_llm, call_mcp_tool
 from app.utils.crypto import decrypt_value
@@ -182,8 +183,7 @@ class _Run:
             plan, result, used = await self._llm_json("plan", plan_messages, _validate_plan)
             await AgentTaskService.record_step(session, task, "plan", plan, prompt=used, tokens_in=result.tokens_in, tokens_out=result.tokens_out,
                                                duration_ms=int((self.clock() - self.started) * 1000))
-            task.plan = plan
-            await session.commit()
+            await AgentTaskService.set_phase_output(session, task, plan=plan)
 
             # Phase 2: tool loop
             self.messages.append({"role": "user", "content": EXECUTE_PROMPT + "\nPlan:\n" + json.dumps(plan)})
@@ -243,10 +243,17 @@ class _Run:
                 timeout=remaining)
         except asyncio.TimeoutError:
             raise RunFailed("critique", "final phases exceeded the grace period")
+        # Only criteria the plan declared count: an invented "met" one would
+        # otherwise inflate the outcome the code derives.
+        declared = set(ids)
+        critique["criteria"] = [c for c in critique["criteria"] if str(c.get("id")) in declared]
         critique["limit_hit"] = self.limit_hit.value if self.limit_hit else None
         await AgentTaskService.record_step(session, task, "critique", critique, prompt=used, tokens_in=result.tokens_in, tokens_out=result.tokens_out)
-        task.critique = critique
-        await session.commit()
+        await AgentTaskService.set_phase_output(session, task, critique=critique)
+        # A cancel asked for during the critique call must still be honoured;
+        # the check before the critique cannot see it.
+        if await AgentTaskService.is_cancel_requested(session, self.task_id):
+            raise Cancelled()
 
         await session.refresh(task, ["steps"])
         step_index = "; ".join(f"{s.seq}: {s.kind}" + (f" {s.payload.get('tool')}" if s.kind == "tool_call" else "") for s in task.steps)
@@ -261,7 +268,7 @@ class _Run:
         except asyncio.TimeoutError:
             raise RunFailed("report", "final phases exceeded the grace period")
         await AgentTaskService.record_step(session, task, "report", report, prompt=used, tokens_in=result.tokens_in, tokens_out=result.tokens_out)
-        task.report = report
+        await AgentTaskService.set_phase_output(session, task, report=report)
         await AgentTaskService.finish(session, task, "completed", outcome=derive_outcome(critique["criteria"]))
 
 
@@ -283,14 +290,14 @@ async def run_task(task_id: uuid.UUID, *, llm=call_llm, tool=call_mcp_tool, tool
             task = await session.get(AgentTask, task_id)
             if task is None:
                 return
-            if task.status in ("queued", "running"):
+            if task.status in OPEN_STATUSES:
                 await AgentTaskService.finish(session, task, "cancelled")
     except RunFailed as exc:
         async with session_factory() as session:
             task = await session.get(AgentTask, task_id)
             if task is None:
                 return
-            if task.status in ("queued", "running"):
+            if task.status in OPEN_STATUSES:
                 await AgentTaskService.record_step(session, task, "error", {"message": exc.message, "phase": exc.phase})
                 await AgentTaskService.finish(session, task, "failed", error=f"{exc.phase}: {exc.message}")
     except Exception as exc:  # noqa: BLE001 - the worker must never die on one task
@@ -299,6 +306,6 @@ async def run_task(task_id: uuid.UUID, *, llm=call_llm, tool=call_mcp_tool, tool
             task = await session.get(AgentTask, task_id)
             if task is None:
                 return
-            if task.status in ("queued", "running"):
+            if task.status in OPEN_STATUSES:
                 await AgentTaskService.record_step(session, task, "error", {"message": str(exc), "phase": "loop"})
                 await AgentTaskService.finish(session, task, "failed", error=f"loop: {exc}")

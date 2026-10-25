@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Agent, AgentTask, AgentTaskStep
-from app.models.agent_task import FINAL_STATUSES
+from app.models.agent_task import FINAL_STATUSES, OPEN_STATUSES
 
 log = structlog.get_logger()
 
@@ -47,7 +47,7 @@ class AgentTaskService:
         if agent.status != "active":
             raise TaskConflict(f"Agent is {agent.status}; only active agents can run")
         open_task = (await session.execute(
-            select(AgentTask.id).where(AgentTask.agent_id == agent.id, AgentTask.status.in_(("queued", "running"))).limit(1)
+            select(AgentTask.id).where(AgentTask.agent_id == agent.id, AgentTask.status.in_(OPEN_STATUSES)).limit(1)
         )).scalar_one_or_none()
         if open_task:
             raise TaskConflict("Agent already has a queued or running task")
@@ -163,12 +163,39 @@ class AgentTaskService:
         return step
 
     @staticmethod
-    async def finish(session, task, status, *, outcome=None, error=None) -> bool:
+    async def set_phase_output(session: AsyncSession, task: AgentTask, *, plan: dict | None = None,
+                               critique: dict | None = None, report: dict | None = None) -> None:
+        """Store the plan / critique / report copies on the task row.
+
+        The step rows carry the same payloads; these columns are the read model
+        the task page renders without walking the journal. Here so the runner
+        never writes agent_task directly.
+
+        Guarded like finish(): a task a stale sweep already gave up on must not
+        keep collecting outputs from the run that lost it."""
+        values = {k: v for k, v in (("plan", plan), ("critique", critique), ("report", report)) if v is not None}
+        if not values:
+            return
+        result = await session.execute(
+            update(AgentTask).where(AgentTask.id == task.id, AgentTask.status.in_(OPEN_STATUSES)).values(**values)
+        )
+        if result.rowcount == 0:
+            await session.rollback()
+            await session.refresh(task)
+            log.warning("agent_task_phase_output_skipped", task_id=str(task.id),
+                        current=task.status, fields=sorted(values))
+            return
+        await session.commit()
+        await session.refresh(task)
+
+    @staticmethod
+    async def finish(session: AsyncSession, task: AgentTask, status: str, *,
+                     outcome: str | None = None, error: str | None = None) -> bool:
         if status not in FINAL_STATUSES:
             raise ValueError(f"not a final status: {status}")
         result = await session.execute(
             update(AgentTask)
-            .where(AgentTask.id == task.id, AgentTask.status.in_(("queued", "running")))
+            .where(AgentTask.id == task.id, AgentTask.status.in_(OPEN_STATUSES))
             .values(status=status, outcome=outcome, error=error, finished_at=func.now())
         )
         if result.rowcount == 0:

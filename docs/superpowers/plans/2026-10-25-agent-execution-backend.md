@@ -20,7 +20,7 @@ Spec: `docs/superpowers/specs/2026-10-25-agent-execution-design.md`. Frontend is
 - Settings with defaults: `AGENT_WORKER_CONCURRENCY=2`, `AGENT_TASK_HEARTBEAT_SECONDS=15`, `AGENT_TASK_STALE_SECONDS=90`, `AGENT_TASK_FINAL_GRACE_SECONDS=90`.
 - Verdict by code: criterion met iff `met is True and confidence >= 0.5`; all met → `success`, none → `failed`, else `partial`. `max_steps` counts loop rounds only.
 - Tool results truncated to `MAX_TOOL_RESULT_LEN = 2000` like the chat. Prompts stored verbatim on `plan`/`turn`/`critique`/`report` steps and never contain API keys.
-- Every mutating write to `agent_task` / `agent_task_step` goes through `AgentTaskService`; it emits `NOTIFY agent_task_events` (`{"task_id","seq","status"}`) after step inserts and status changes, and `NOTIFY agent_task_queued` after enqueue.
+- Every mutating write to `agent_task` / `agent_task_step` goes through `AgentTaskService` (steps, status, and the plan/critique/report outputs via `set_phase_output`); it emits `NOTIFY agent_task_events` (`{"task_id","seq","status"}`) after step inserts and status changes, and `NOTIFY agent_task_queued` after enqueue.
 - Claim SQL guarantees one `running` task per agent (`NOT EXISTS` on running tasks of the same agent).
 - Routers stay thin: lifecycle and cron sync live in `services/agent_service.py`, task writes in `services/agent_task_service.py`. One file per entity in `models/`, `schemas/`, `routers/`; export every new model and schema from the package `__init__`s.
 - Chat behaviour must not change; its tests remain the regression proof after the extraction.

@@ -11,6 +11,7 @@ import structlog
 from app.config import settings
 from app.database import async_session, engine
 from app.models import AgentTask
+from app.models.agent_task import OPEN_STATUSES
 from app.services.agent_runner import run_task
 from app.services.agent_task_service import QUEUED_CHANNEL, AgentTaskService
 
@@ -83,12 +84,20 @@ class Worker:
         beater = asyncio.create_task(beat())
         try:
             await self.run(task_id, session_factory=self.sf)
-        except Exception:
+        except Exception as exc:
             # The runner marks the task row itself on a handled failure; this
             # is the backstop for whatever escapes it (e.g. CancelledError is
             # a BaseException and is not caught here on purpose - it must
             # still propagate so task.cancel() in close() actually cancels).
             log.exception("agent_task_run_crashed", task_id=str(task_id))
+            try:
+                async with self.sf() as session:
+                    task = await session.get(AgentTask, task_id)
+                    if task is not None and task.status in OPEN_STATUSES:
+                        await AgentTaskService.record_step(session, task, "error", {"message": str(exc), "phase": "claim"})
+                        await AgentTaskService.finish(session, task, "failed", error=f"claim: {exc}")
+            except Exception as mark_exc:
+                log.warning("agent_task_mark_failed_error", task_id=str(task_id), error=str(mark_exc))
         finally:
             beater.cancel()
             self._wake.set()
@@ -120,31 +129,47 @@ class Worker:
                 loop.add_signal_handler(sig, self.request_stop)
             except NotImplementedError:  # non-Unix event loops
                 pass
-        await self.sweep()
-        last_sweep = asyncio.get_event_loop().time()
+
+        def on_queued(*_):
+            self._wake.set()
+
+        last_sweep = loop.time()
+        swept_at_start = False
         backoff = 1
         while not self._stopping.is_set():
             try:
                 async with engine.connect() as conn:
                     raw = (await conn.get_raw_connection()).driver_connection
-                    await raw.add_listener(QUEUED_CHANNEL, lambda *_: self._wake.set())
+                    await raw.add_listener(QUEUED_CHANNEL, on_queued)
                     backoff = 1
-                    while not self._stopping.is_set():
-                        try:
-                            await self.process_available()
-                        except Exception as exc:
-                            log.warning("agent_worker_poll_error", error=str(exc))
-                        try:
-                            await asyncio.wait_for(self._wake.wait(), timeout=POLL_SECONDS)
-                        except asyncio.TimeoutError:
-                            pass
-                        self._wake.clear()
-                        if asyncio.get_event_loop().time() - last_sweep > SWEEP_SECONDS:
+                    try:
+                        if not swept_at_start:
+                            # Inside the retry: a database that is not up yet
+                            # must back off, not kill the worker on startup.
+                            await self.sweep()
+                            last_sweep = loop.time()
+                            swept_at_start = True
+                        while not self._stopping.is_set():
                             try:
-                                await self.sweep()
+                                await self.process_available()
                             except Exception as exc:
-                                log.warning("agent_worker_poll_error", error=str(exc))
-                            last_sweep = asyncio.get_event_loop().time()
+                                log.warning("agent_worker_claim_error", error=str(exc))
+                            try:
+                                await asyncio.wait_for(self._wake.wait(), timeout=POLL_SECONDS)
+                            except asyncio.TimeoutError:
+                                pass
+                            self._wake.clear()
+                            if loop.time() - last_sweep > SWEEP_SECONDS:
+                                try:
+                                    await self.sweep()
+                                except Exception as exc:
+                                    log.warning("agent_worker_sweep_error", error=str(exc))
+                                last_sweep = loop.time()
+                    finally:
+                        # Before the connection goes back, like the SSE stream:
+                        # a listener left on a returned connection fires into a
+                        # closure whose loop may already be gone.
+                        await raw.remove_listener(QUEUED_CHANNEL, on_queued)
             except Exception as exc:
                 log.warning("agent_worker_listen_error", error=str(exc))
                 await asyncio.sleep(min(30, backoff))

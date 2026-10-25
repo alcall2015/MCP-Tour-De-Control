@@ -3,11 +3,12 @@ import os
 
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from structlog.testing import capture_logs
 
 from app.config import settings
-from app.models import Agent, AgentTask, McpServer
+from app.models import Agent, AgentTask, AgentTaskStep, McpServer
 from app.services.agent_task_service import AgentTaskService
 from app.worker import Worker
 
@@ -112,10 +113,38 @@ async def test_run_crash_is_logged_and_slot_freed(setup_db, session):
     agent = await _agent(session, "crashme")
     await AgentTaskService.enqueue(session, agent, objective=None, trigger="manual")
 
+    with capture_logs() as logs:
+        assert await worker.process_available() == 1
+        await asyncio.sleep(0.1)
+
+    assert any(e["event"] == "agent_task_run_crashed" for e in logs)
+    assert worker._free_slots() == worker.concurrency
+    await worker.close()
+
+
+async def test_run_crash_marks_task_failed(setup_db, session):
+    """Whatever escapes run_task is the worker's to record, phase `claim`."""
+    async def crashing_run(task_id, **_):
+        raise RuntimeError("boom")
+
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    worker = Worker(concurrency=1, run=crashing_run, session_factory=factory, worker_id="w-test")
+
+    agent = await _agent(session, "crashmark")
+    task = await AgentTaskService.enqueue(session, agent, objective=None, trigger="manual")
+
     assert await worker.process_available() == 1
     await asyncio.sleep(0.1)
 
-    assert worker._free_slots() == worker.concurrency
+    async with factory() as s:
+        refreshed = await s.get(AgentTask, task.id)
+        assert refreshed.status == "failed"
+        assert refreshed.error.startswith("claim:") and "boom" in refreshed.error
+        steps = (await s.execute(
+            select(AgentTaskStep).where(AgentTaskStep.task_id == task.id).order_by(AgentTaskStep.seq)
+        )).scalars().all()
+        assert [st.kind for st in steps] == ["error"]
+        assert steps[0].payload == {"message": "boom", "phase": "claim"}
     await worker.close()
 
 

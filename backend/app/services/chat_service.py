@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChatMessage, Config, Conversation, McpServer
-from app.services.llm_runtime import MAX_TOOL_RESULT_LEN, build_tool_defs, call_llm, call_mcp_tool
+from app.services.llm_runtime import build_tool_defs, call_llm, call_mcp_tool
 from app.utils.crypto import decrypt_value
 from app.utils.sse import sse_frame as _sse
 

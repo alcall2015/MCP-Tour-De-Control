@@ -225,6 +225,27 @@ async def test_delete_blocked_statuses(setup_test_db, status):
     assert resp.status_code == 409
 
 
+async def test_delete_409_while_a_task_is_open(setup_test_db):
+    """An open task must be cancelled first: the cascade would delete the row a
+    worker is mid-run on."""
+    from app.models import Agent
+    from app.services.agent_task_service import AgentTaskService
+    async with client() as c:
+        data = await create_agent(c)
+        await set_status(setup_test_db, data["id"], "active")
+        async with setup_test_db() as session:
+            agent = await session.get(Agent, uuid.UUID(data["id"]))
+            task = await AgentTaskService.enqueue(session, agent, objective=None, trigger="manual")
+        # archiving an active agent does not touch a task already in flight
+        await set_status(setup_test_db, data["id"], "archived")
+        resp = await c.delete(f"/api/v1/agents/{data['id']}")
+        assert resp.status_code == 409 and "cancel it first" in resp.json()["detail"]
+
+        # cancelled, so no longer open: the delete goes through
+        assert (await c.post(f"/api/v1/agent-tasks/{task.id}/cancel")).status_code == 202
+        assert (await c.delete(f"/api/v1/agents/{data['id']}")).status_code == 204
+
+
 async def test_delete_not_found():
     async with client() as c:
         resp = await c.delete(f"/api/v1/agents/{uuid.uuid4()}")

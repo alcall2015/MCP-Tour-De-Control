@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models import Agent, AgentTask
+from app.models.agent_task import OPEN_STATUSES
 from app.schemas.agent import AgentUpdate
 from app.services.agent_task_service import AgentTaskService, TaskConflict
 from app.services.scheduler_service import scheduler_service
@@ -73,6 +74,17 @@ class AgentService:
             AgentService.sync_cron_job(agent)
         log.info("agent_updated", agent_id=str(agent.id), fields=sorted(data.model_fields_set))
         return agent
+
+    @staticmethod
+    async def assert_no_open_task(session: AsyncSession, agent_id: uuid.UUID) -> None:
+        """Refuse to delete an agent under a task: the cascade would delete the
+        row a worker is mid-run on, and the run would only notice at its next
+        write."""
+        open_task = (await session.execute(
+            select(AgentTask.id).where(AgentTask.agent_id == agent_id, AgentTask.status.in_(OPEN_STATUSES)).limit(1)
+        )).scalar_one_or_none()
+        if open_task:
+            raise AgentStateError(409, "Agent has a queued or running task; cancel it first")
 
     @staticmethod
     async def task_summaries(session: AsyncSession, agent_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:

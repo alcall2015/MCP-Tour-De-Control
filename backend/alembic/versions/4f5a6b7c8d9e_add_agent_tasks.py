@@ -46,8 +46,10 @@ def upgrade():
     op.create_index("ix_agent_task_agent_created", "agent_task", ["agent_id", sa.text("created_at DESC")])
     op.create_index("ix_agent_task_queue", "agent_task", ["created_at"], postgresql_where=sa.text("status = 'queued'"))
     op.create_index("ix_agent_task_running", "agent_task", ["agent_id"], postgresql_where=sa.text("status = 'running'"))
+    # Phrased as NOT IN the final states so a future open state (waiting_approval)
+    # stays covered without another migration.
     op.create_index("uq_agent_task_open_per_agent", "agent_task", ["agent_id"], unique=True,
-                     postgresql_where=sa.text("status IN ('queued','running')"))
+                     postgresql_where=sa.text("status NOT IN ('completed','failed','cancelled')"))
     op.create_table(
         "agent_task_step",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),

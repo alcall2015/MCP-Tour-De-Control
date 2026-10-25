@@ -9,6 +9,9 @@ from app.models.config import Base
 
 TASK_STATUSES = ("queued", "running", "completed", "failed", "cancelled")
 FINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+# "Open" is defined as "not final", so a future state (waiting_approval) is
+# covered by the partial unique index without a migration.
+OPEN_STATUSES = ("queued", "running")
 OUTCOMES = ("success", "partial", "failed")
 TRIGGERS = ("manual", "cron")
 STEP_KINDS = ("plan", "turn", "tool_call", "critique", "report", "error")
@@ -58,7 +61,10 @@ class AgentTask(Base):
         Index("ix_agent_task_agent_created", "agent_id", text("created_at DESC")),
         Index("ix_agent_task_queue", "created_at", postgresql_where=text("status = 'queued'")),
         Index("ix_agent_task_running", "agent_id", postgresql_where=text("status = 'running'")),
-        Index("uq_agent_task_open_per_agent", "agent_id", unique=True, postgresql_where=text("status IN ('queued','running')")),
+        # Phrased as NOT IN the final states, not IN the open ones, so adding an
+        # open state never needs a migration to stay covered.
+        Index("uq_agent_task_open_per_agent", "agent_id", unique=True,
+              postgresql_where=text("status NOT IN ('completed','failed','cancelled')")),
     )
 
 

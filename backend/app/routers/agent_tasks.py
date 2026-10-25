@@ -73,6 +73,11 @@ def _status_payload(task: AgentTask) -> dict:
             "finished_at": task.finished_at.isoformat() if task.finished_at else None}
 
 
+# A task deleted under the stream (its agent was removed) has no row left to
+# report; the client is told so and the stream closes instead of raising.
+GONE_PAYLOAD = {"status": "gone", "outcome": None, "error": "task no longer exists", "finished_at": None}
+
+
 async def _steps_after(task_id: uuid.UUID, last_seq: int) -> list[AgentTaskStep]:
     async with session_factory() as session:
         return (await session.execute(
@@ -94,6 +99,10 @@ async def _event_stream(task_id: uuid.UUID):
             last_seq = step.seq
             yield sse_frame("step", AgentTaskStepRead.model_validate(step).model_dump(mode="json"))
         task = await _task_snapshot(task_id)
+        if task is None:
+            yield sse_frame("status", GONE_PAYLOAD)
+            yield sse_frame("done", {})
+            return
         last_status = task.status
         yield sse_frame("status", _status_payload(task))
         if task.status in FINAL_STATUSES:
@@ -127,6 +136,10 @@ async def _event_stream(task_id: uuid.UUID):
                         last_seq = step.seq
                         yield sse_frame("step", AgentTaskStepRead.model_validate(step).model_dump(mode="json"))
                     task = await _task_snapshot(task_id)
+                    if task is None:
+                        yield sse_frame("status", GONE_PAYLOAD)
+                        yield sse_frame("done", {})
+                        return
                     if task.status != last_status or task.status in FINAL_STATUSES:
                         last_status = task.status
                         yield sse_frame("status", _status_payload(task))

@@ -114,6 +114,10 @@ async def delete_agent(agent_id: uuid.UUID, session: AsyncSession = Depends(get_
     agent = await _get_agent(session, agent_id)
     if agent.status not in ("draft", "archived"):
         raise HTTPException(status_code=409, detail=f"Cannot delete a {agent.status} agent; archive it first")
+    try:
+        await AgentService.assert_no_open_task(session, agent_id)
+    except AgentStateError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     await session.delete(agent)
     await session.commit()
     scheduler_service.remove_agent_job(agent_id)
