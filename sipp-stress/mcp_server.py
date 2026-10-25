@@ -39,6 +39,7 @@ async def start_test(
     transport: str = "udp",
     caller_id: str = "sipp",
     media_type: str = "random",
+    destinations: list[str] | None = None,
 ) -> dict:
     """Launch a SIPp stress test against the target SIP server."""
     config = TestConfig(
@@ -54,6 +55,7 @@ async def start_test(
         transport=transport,
         caller_id=caller_id,
         media_type=media_type,
+        destinations=destinations or [],
     )
     test_id = await runner.start(config)
     test = runner.get_test(test_id)

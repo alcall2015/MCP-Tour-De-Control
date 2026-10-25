@@ -42,11 +42,14 @@
     ]]>
   </send>
 
-  <recv request="ACK" optional="true" crlf="true"/>
+  <!-- SIPp 3.6 rejects an optional receive immediately before a media action. -->
+  <recv request="ACK" crlf="true"/>
 
   <nop>
     <action>
-      <exec play_pcap_audio="[field0]"/>
+      <!-- SIPp 3.6 validates this path at scenario load time and does not
+           resolve injected fields here. Use the bundled neutral RTP media. -->
+      <exec play_pcap_audio="/app/media/silence.pcap"/>
     </action>
   </nop>
 

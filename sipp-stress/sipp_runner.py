@@ -40,6 +40,7 @@ class TestConfig:
     transport: str = "udp"
     caller_id: str = "sipp"
     media_type: str = "random"
+    destinations: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -65,13 +66,16 @@ class SippRunner:
         """Generate SIPp injection CSV for UAC (caller_id + call_duration) and UAS (media file)."""
         results = self._results_dir(test_id)
 
-        # UAC injection: field0=caller_id, field1=call_duration_ms
+        # UAC injection: field0=caller_id, field1=called test destination.
         uac_csv = results / "uac_inject.csv"
         with open(uac_csv, "w", newline="") as f:
             writer = csv.writer(f, delimiter=";")
             writer.writerow(["SEQUENTIAL"])
-            for _ in range(config.max_calls + 100):
-                writer.writerow([config.caller_id, str(config.call_duration * 1000)])
+            destinations = config.destinations or ["service"]
+            for index in range(config.max_calls + 100):
+                # SIPp's CSV parser requires a trailing field separator. Without it,
+                # it appends a literal dot to the final substituted field.
+                writer.writerow([config.caller_id, destinations[index % len(destinations)], ""])
 
         # UAS injection: field0=media_pcap_path
         uas_csv = results / "uas_inject.csv"
@@ -92,7 +96,7 @@ class SippRunner:
                     media = str(MEDIA_DIR / "tone.pcap")
                 else:
                     media = str(MEDIA_DIR / "voice.pcap")
-                writer.writerow([media])
+                writer.writerow([media, ""])
 
         return uac_csv, uas_csv
 
