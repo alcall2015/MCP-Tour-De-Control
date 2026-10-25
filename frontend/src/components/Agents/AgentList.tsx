@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FINAL_TASK_STATUSES, cancelAgentTask, deleteAgent, listAgents, setAgentStatus } from "../../lib/api";
 import type { Agent, AgentStatus } from "../../lib/api";
 
-/** A run still in flight: queued counts too, since `running_task_id` is set only once the worker picks the task up. */
-const hasOpenTask = (agent: Agent) => Boolean(agent.last_task && !FINAL_TASK_STATUSES.has(agent.last_task.status));
 import { AgentCard } from "./AgentCard";
 import { RunAgentModal } from "./RunAgentModal";
 import { Spinner } from "../ui/Spinner";
+
+/** A run still in flight: queued counts too, since `running_task_id` is set only once the worker picks the task up. */
+const hasOpenTask = (agent: Agent) => Boolean(agent.last_task && !FINAL_TASK_STATUSES.has(agent.last_task.status));
 
 interface Props {
   view: "active" | "archived";

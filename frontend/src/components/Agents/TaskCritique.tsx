@@ -34,7 +34,7 @@ export function TaskCritique({ critique, plan }: { critique: AgentCritique | nul
                 const counts = Boolean(c?.met) && confidence >= 0.5;
                 return (
                   <tr key={c?.id ?? i} className="align-top" style={{ borderTop: "1px solid var(--border)" }}>
-                    <td className="py-2 pr-3"><span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{c?.id}</span> <span style={{ color: "var(--text-secondary)" }}>{describe(c?.id)}</span></td>
+                    <td className="py-2 pr-3"><span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{text(c?.id)}</span> <span style={{ color: "var(--text-secondary)" }}>{describe(c?.id)}</span></td>
                     <td className="py-2 pr-3" style={{ color: counts ? "var(--success)" : "var(--error)" }}>{c?.met ? "yes" : "no"}</td>
                     <td className="py-2 pr-3">
                       <div className="flex items-center gap-2">

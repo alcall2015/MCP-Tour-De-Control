@@ -16,7 +16,7 @@ export function TaskPlan({ plan }: { plan: AgentPlan | null }) {
                 <li key={i} className="flex gap-2">
                   <span className="font-mono" style={{ color: "var(--text-muted)" }}>{i + 1}.</span>
                   <span>
-                    {s.title}
+                    {text(s.title)}
                     {tools.length > 0 && <span className="ml-2 font-mono text-xs" style={{ color: "var(--accent)" }}>{tools.map(text).join(", ")}</span>}
                   </span>
                 </li>
@@ -27,7 +27,7 @@ export function TaskPlan({ plan }: { plan: AgentPlan | null }) {
             <p className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Success criteria</p>
             <ul className="space-y-1 text-sm" style={{ color: "var(--text-secondary)" }}>
               {(plan.success_criteria ?? []).map((c, i) => (
-                <li key={c?.id ?? i} className="flex gap-2"><span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{c?.id}</span><span>{text(c?.description)}</span></li>
+                <li key={c?.id ?? i} className="flex gap-2"><span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{text(c?.id)}</span><span>{text(c?.description)}</span></li>
               ))}
             </ul>
           </div>
