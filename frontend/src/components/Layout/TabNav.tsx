@@ -99,14 +99,14 @@ export function TabNav() {
           </div>
 
           {/* Center: Tabs */}
-          <div className="flex gap-0.5 overflow-x-auto">
+          <div className="flex gap-0.5">
             {tabs.map((tab) => (
               <NavLink
                 key={tab.to}
                 to={tab.to}
                 end={tab.to === "/"}
                 className={({ isActive }) =>
-                  `flex items-center gap-1.5 whitespace-nowrap px-4 py-3.5 text-sm font-medium transition-all duration-200 relative ${
+                  `flex items-center gap-1.5 whitespace-nowrap px-2.5 py-3.5 text-sm font-medium transition-all duration-200 relative ${
                     isActive ? "text-white" : "hover:text-white"
                   }`
                 }
@@ -124,7 +124,7 @@ export function TabNav() {
               href={`https://${window.location.hostname}:8443`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 whitespace-nowrap px-4 py-3.5 text-sm font-medium transition-all duration-200 hover:text-white"
+              className="flex items-center gap-1.5 whitespace-nowrap px-2.5 py-3.5 text-sm font-medium transition-all duration-200 hover:text-white"
               style={{
                 color: "var(--text-secondary)",
                 borderBottom: "2px solid transparent",
