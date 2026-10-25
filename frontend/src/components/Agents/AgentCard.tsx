@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { listAgentTasks } from "../../lib/api";
+import { FINAL_TASK_STATUSES, listAgentTasks } from "../../lib/api";
 import type { Agent, AgentStatus } from "../../lib/api";
 import { MutationError } from "../ui/MutationError";
 import { AgentTaskRow } from "./AgentTaskRow";
@@ -16,7 +16,7 @@ interface Props {
   onStatus: (agent: Agent, status: AgentStatus) => void;
   onDelete: (agent: Agent) => void;
   onRun: (agent: Agent) => void;
-  onCancelTask: (agent: Agent) => void;
+  onCancelTask: (agent: Agent, taskId: string) => void;
 }
 
 const BADGE: Record<AgentStatus, { color: string; bg: string; border: string; label: string }> = {
@@ -31,7 +31,8 @@ export function AgentCard({ agent, busy, error, onEdit, onStatus, onDelete, onRu
   const [showTasks, setShowTasks] = useState(false);
   const badge = BADGE[agent.status];
   const updated = new Date(agent.updated_at).toLocaleString();
-  const running = agent.running_task_id !== null;
+  // `running_task_id` is set only once the worker picks the task up: a queued task is still a run in flight.
+  const openTask = agent.last_task && !FINAL_TASK_STATUSES.has(agent.last_task.status) ? agent.last_task : null;
 
   const { data: recent = [], isLoading: loadingTasks } = useQuery({
     queryKey: ["agent-tasks", agent.id, "recent"],
@@ -47,8 +48,8 @@ export function AgentCard({ agent, busy, error, onEdit, onStatus, onDelete, onRu
     ? [action("Confirm delete", () => { setConfirmDelete(false); onDelete(agent); }, "btn-danger"), action("Keep", () => setConfirmDelete(false))]
     : [action("Delete", () => setConfirmDelete(true), "btn-danger")];
 
-  const runButton = running
-    ? action("Cancel run", () => onCancelTask(agent), "btn-danger")
+  const runButton = openTask
+    ? action("Cancel run", () => onCancelTask(agent, openTask.id), "btn-danger")
     : action("Run", () => onRun(agent), "btn-primary");
 
   const actions: ReactNode[] = {
@@ -66,9 +67,9 @@ export function AgentCard({ agent, busy, error, onEdit, onStatus, onDelete, onRu
             <span className={`h-2 w-2 flex-shrink-0 rounded-full ${agent.status === "active" ? "pulse-dot" : ""}`} style={{ backgroundColor: badge.color }} />
             <span className="font-semibold truncate" style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif", color: "var(--text-primary)", fontSize: "0.9375rem" }}>{agent.name}</span>
             <span className="badge flex-shrink-0" style={{ color: badge.color, backgroundColor: badge.bg, border: `1px solid ${badge.border}` }}>{badge.label}</span>
-            {running && agent.running_task_id && (
-              <Link to={`/agents/${agent.id}/tasks/${agent.running_task_id}`} className="flex-shrink-0" style={{ textDecoration: "none" }}>
-                <TaskStatusBadge status="running" />
+            {openTask && (
+              <Link to={`/agents/${agent.id}/tasks/${openTask.id}`} className="flex-shrink-0" style={{ textDecoration: "none" }}>
+                <TaskStatusBadge status={openTask.status} />
               </Link>
             )}
             {agent.cron_expr && <span className="font-mono text-xs flex-shrink-0" style={{ color: "var(--text-muted)" }} title="Cron schedule">{agent.cron_expr}</span>}

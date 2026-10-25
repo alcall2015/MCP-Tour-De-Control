@@ -85,6 +85,7 @@ export const regenerateScript = (id: string) =>
 // Agents
 export const listAgents = (status?: AgentStatus) =>
   request<Agent[]>(`/agents${status ? `?status=${status}` : ""}`);
+export const getAgent = (id: string) => request<Agent>(`/agents/${id}`);
 export const createAgent = (data: AgentCreate) =>
   request<Agent>("/agents", { method: "POST", body: JSON.stringify(data) });
 export const updateAgent = (id: string, data: AgentUpdate) =>

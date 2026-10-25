@@ -12,6 +12,8 @@ import type { AgentTaskDetail, AgentTaskStep } from "../../lib/api";
 export function useAgentTaskStream(taskId: string) {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["agent-task", taskId], queryFn: () => getAgentTask(taskId) });
+  // Bound once per observer by TanStack Query, so it is a stable effect dependency.
+  const { refetch } = query;
   const [liveSteps, setLiveSteps] = useState<AgentTaskStep[]>([]);
   const [liveStatus, setLiveStatus] = useState<AgentTaskDetail["status"] | "gone" | null>(null);
   const [liveMeta, setLiveMeta] = useState<{ outcome: AgentTaskDetail["outcome"]; error: string | null; finished_at: string | null } | null>(null);
@@ -33,6 +35,7 @@ export function useAgentTaskStream(taskId: string) {
   useEffect(() => {
     if (!shouldStream) return;
     const controller = new AbortController();
+    let sawDone = false;
     setLive(true);
     streamAgentTask(taskId, (e) => {
       if (e.event === "step") {
@@ -41,6 +44,7 @@ export function useAgentTaskStream(taskId: string) {
         setLiveStatus(e.data.status);
         setLiveMeta({ outcome: e.data.outcome, error: e.data.error, finished_at: e.data.finished_at });
       } else if (e.event === "done") {
+        sawDone = true;
         setLive(false);
         queryClient.invalidateQueries({ queryKey: ["agent-task", taskId] });
         queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -50,9 +54,19 @@ export function useAgentTaskStream(taskId: string) {
       }
     }, controller.signal)
       .catch((err: unknown) => { if (!controller.signal.aborted) setStreamError(err instanceof Error ? err.message : String(err)); })
-      .finally(() => setLive(false));
+      .finally(() => {
+        // A stream that ends without `done` (proxy timeout, worker gone) leaves the merged view stale: resync once.
+        if (!controller.signal.aborted) {
+          if (!sawDone) {
+            refetch();
+            setStreamError((prev) => prev ?? "the live connection closed before the task finished");
+          }
+          // Guarded: StrictMode's first cleanup aborts a controller whose promise settles after the second setup set `live`.
+          setLive(false);
+        }
+      });
     return () => controller.abort();
-  }, [shouldStream, taskId, queryClient]);
+  }, [shouldStream, taskId, queryClient, refetch]);
 
   // Merge: the fetched detail is the base; live steps and status overlay it.
   const base = query.data ?? null;
@@ -71,6 +85,6 @@ export function useAgentTaskStream(taskId: string) {
     streamError,
     isLoading: query.isLoading,
     error: query.error,
-    refetch: () => query.refetch(),
+    refetch,
   };
 }

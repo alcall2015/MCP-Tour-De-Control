@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { FINAL_TASK_STATUSES, cancelAgentTask, listAgents } from "../lib/api";
+import { FINAL_TASK_STATUSES, cancelAgentTask, getAgent } from "../lib/api";
 import { Spinner } from "../components/ui/Spinner";
 import { MutationError } from "../components/ui/MutationError";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
@@ -16,8 +16,8 @@ export function AgentTaskPage() {
   const { agentId = "", taskId = "" } = useParams();
   const queryClient = useQueryClient();
   const { task, steps, gone, live, streamError, isLoading, error } = useAgentTaskStream(taskId);
-  const { data: agents = [] } = useQuery({ queryKey: ["agents", "all"], queryFn: () => listAgents() });
-  const agent = agents.find((a) => a.id === agentId) ?? null;
+  // Fetched by id, not filtered out of the list: an archived agent's task page must still name its agent.
+  const { data: agent } = useQuery({ queryKey: ["agent", agentId], queryFn: () => getAgent(agentId), enabled: Boolean(agentId) });
 
   const cancelMut = useMutation({
     mutationFn: () => cancelAgentTask(taskId),
@@ -38,7 +38,11 @@ export function AgentTaskPage() {
   }
 
   const isFinal = FINAL_TASK_STATUSES.has(task.status) || gone;
-  const duration = formatDuration(task.started_at, task.finished_at);
+  // While streaming, the stored task row lags behind the steps already on screen: count and sum from the steps instead.
+  const startedAt = task.started_at ?? (live ? steps[0]?.created_at ?? null : null);
+  const duration = startedAt ? formatDuration(startedAt, task.finished_at) : "";
+  const tokensIn = live ? steps.reduce((n, s) => n + (s.tokens_in ?? 0), 0) : task.tokens_in;
+  const tokensOut = live ? steps.reduce((n, s) => n + (s.tokens_out ?? 0), 0) : task.tokens_out;
 
   return (
     <div className="space-y-6">
@@ -53,10 +57,10 @@ export function AgentTaskPage() {
             <OutcomeBadge outcome={task.outcome} />
             {live && <span style={{ color: "var(--running)" }}>live</span>}
             <span>{task.trigger}</span>
-            {task.started_at && <span>started {new Date(task.started_at).toLocaleString()}</span>}
+            {startedAt && <span>started {new Date(startedAt).toLocaleString()}</span>}
             {duration && <span>{duration}</span>}
-            <span>{task.step_count} steps</span>
-            <span>{task.tokens_in} in / {task.tokens_out} out tokens</span>
+            <span>{steps.length} steps</span>
+            <span>{tokensIn} in / {tokensOut} out tokens</span>
             <span>limits {task.max_steps} rounds · {task.timeout_seconds} s</span>
           </div>
           {task.error && <p className="text-sm" style={{ color: "var(--error)" }}>{task.error}</p>}

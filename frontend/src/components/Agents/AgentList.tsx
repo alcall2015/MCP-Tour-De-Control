@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { cancelAgentTask, deleteAgent, listAgents, setAgentStatus } from "../../lib/api";
+import { FINAL_TASK_STATUSES, cancelAgentTask, deleteAgent, listAgents, setAgentStatus } from "../../lib/api";
 import type { Agent, AgentStatus } from "../../lib/api";
+
+/** A run still in flight: queued counts too, since `running_task_id` is set only once the worker picks the task up. */
+const hasOpenTask = (agent: Agent) => Boolean(agent.last_task && !FINAL_TASK_STATUSES.has(agent.last_task.status));
 import { AgentCard } from "./AgentCard";
 import { RunAgentModal } from "./RunAgentModal";
 import { Spinner } from "../ui/Spinner";
@@ -18,7 +21,7 @@ export function AgentList({ view, onEdit, onCreate }: Props) {
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ["agents", status ?? "all"],
     queryFn: () => listAgents(status),
-    refetchInterval: (query) => query.state.data?.some((a) => a.running_task_id) ? 5000 : false,
+    refetchInterval: (query) => query.state.data?.some(hasOpenTask) ? 5000 : false,
   });
   const [errors, setErrors] = useState<Record<string, unknown>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -74,7 +77,7 @@ export function AgentList({ view, onEdit, onCreate }: Props) {
             onStatus={(a, s) => run(a.id, () => statusMut.mutateAsync({ id: a.id, status: s }))}
             onDelete={(a) => run(a.id, () => deleteMut.mutateAsync(a.id))}
             onRun={(a) => setRunAgent(a)}
-            onCancelTask={(a) => a.running_task_id && run(a.id, () => cancelMut.mutateAsync(a.running_task_id!))}
+            onCancelTask={(a, taskId) => run(a.id, () => cancelMut.mutateAsync(taskId))}
           />
         ))}
       </div>
