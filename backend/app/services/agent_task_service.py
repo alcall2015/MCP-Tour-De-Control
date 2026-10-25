@@ -1,14 +1,17 @@
 """Every write to agent_task / agent_task_step goes through here.
 
 The table doubles as the work queue: `claim` uses FOR UPDATE SKIP LOCKED and
-guarantees one running task per agent; every step and status change is
-followed by a Postgres NOTIFY so the API can stream it."""
+locks the agent row too, but the storage invariant that actually guarantees
+one open task per agent is the partial unique index
+`uq_agent_task_open_per_agent`. Every step and status change is followed by a
+Postgres NOTIFY so the API can stream it."""
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import func, select, text, update
+from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Agent, AgentTask, AgentTaskStep
@@ -58,7 +61,14 @@ class AgentTaskService:
             instructions=agent.instructions, max_steps=agent.max_steps, timeout_seconds=agent.timeout_seconds,
         )
         session.add(task)
-        await session.flush()
+        # The pre-check above is a friendly 409 for the common case; the partial
+        # unique index (uq_agent_task_open_per_agent) is what actually prevents
+        # a cron tick racing a manual Run from inserting two open tasks.
+        try:
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
+            raise TaskConflict("Agent already has a queued or running task")
         await _notify(session, QUEUED_CHANNEL, str(task.id))
         await session.commit()
         await session.refresh(task)
@@ -67,20 +77,24 @@ class AgentTaskService:
 
     @staticmethod
     async def claim(session: AsyncSession, worker_id: str) -> AgentTask | None:
+        # The agent row is locked too (FOR UPDATE OF t, a) as defense in depth:
+        # NOT EXISTS alone cannot see another claimer's uncommitted running row
+        # under READ COMMITTED. Single transaction, notify included.
         row = (await session.execute(text("""
             UPDATE agent_task
             SET status = 'running', worker_id = :worker_id, started_at = now(), heartbeat_at = now()
             WHERE id = (
                 SELECT t.id FROM agent_task t
+                JOIN agent a ON a.id = t.agent_id
                 WHERE t.status = 'queued'
                   AND NOT EXISTS (SELECT 1 FROM agent_task r WHERE r.agent_id = t.agent_id AND r.status = 'running')
                 ORDER BY t.created_at
-                FOR UPDATE SKIP LOCKED
+                FOR UPDATE OF t, a SKIP LOCKED
                 LIMIT 1)
             RETURNING id
         """), {"worker_id": worker_id})).first()
-        await session.commit()
         if not row:
+            await session.commit()
             return None
         task = await session.get(AgentTask, row[0])
         await session.refresh(task)
@@ -90,49 +104,69 @@ class AgentTaskService:
 
     @staticmethod
     async def heartbeat(session: AsyncSession, task_id: uuid.UUID) -> None:
-        await session.execute(update(AgentTask).where(AgentTask.id == task_id).values(heartbeat_at=_now()))
+        await session.execute(update(AgentTask).where(AgentTask.id == task_id).values(heartbeat_at=func.now()))
         await session.commit()
 
     @staticmethod
     async def sweep_stale(session: AsyncSession, older_than_seconds: int) -> int:
-        cutoff = _now() - timedelta(seconds=older_than_seconds)
+        cutoff = func.now() - timedelta(seconds=older_than_seconds)
         stale = (await session.execute(
-            select(AgentTask).where(AgentTask.status == "running", AgentTask.heartbeat_at < cutoff)
+            select(AgentTask).where(
+                AgentTask.status == "running",
+                or_(
+                    AgentTask.heartbeat_at < cutoff,
+                    and_(AgentTask.heartbeat_at.is_(None), AgentTask.started_at < cutoff),
+                ),
+            ).with_for_update(skip_locked=True)
         )).scalars().all()
+        count = 0
         for task in stale:
-            await AgentTaskService.record_step(session, task, "error", {"message": "worker lost", "phase": "claim"})
-            await AgentTaskService.finish(session, task, "failed", error="worker lost")
-            log.warning("agent_task_worker_lost", task_id=str(task.id), worker_id=task.worker_id)
-        return len(stale)
+            try:
+                await AgentTaskService.record_step(session, task, "error", {"message": "worker lost", "phase": "claim"})
+                await AgentTaskService.finish(session, task, "failed", error="worker lost")
+                log.warning("agent_task_worker_lost", task_id=str(task.id), worker_id=task.worker_id)
+                count += 1
+            except Exception:
+                log.exception("agent_task_sweep_failed", task_id=str(task.id))
+                await session.rollback()
+        return count
 
     @staticmethod
     async def record_step(session: AsyncSession, task: AgentTask, kind: str, payload: dict, *,
                           prompt: list | None = None, tokens_in: int | None = None,
                           tokens_out: int | None = None, duration_ms: int | None = None) -> AgentTaskStep:
+        # Lock the task row first so two writers racing on the same task cannot
+        # both read the same max(seq) or clobber each other's totals.
+        await session.execute(select(AgentTask.id).where(AgentTask.id == task.id).with_for_update())
         next_seq = (await session.execute(
             select(func.coalesce(func.max(AgentTaskStep.seq), 0) + 1).where(AgentTaskStep.task_id == task.id)
         )).scalar_one()
         step = AgentTaskStep(task_id=task.id, seq=next_seq, kind=kind, payload=payload, prompt=prompt,
                              tokens_in=tokens_in, tokens_out=tokens_out, duration_ms=duration_ms)
         session.add(step)
-        task.step_count = next_seq
-        task.tokens_in = (task.tokens_in or 0) + (tokens_in or 0)
-        task.tokens_out = (task.tokens_out or 0) + (tokens_out or 0)
+        await session.execute(update(AgentTask).where(AgentTask.id == task.id).values(
+            step_count=next_seq,
+            tokens_in=AgentTask.tokens_in + (tokens_in or 0),
+            tokens_out=AgentTask.tokens_out + (tokens_out or 0),
+        ))
         await session.flush()
         await _notify_event(session, task, next_seq)
         await session.commit()
+        await session.refresh(task)
         return step
 
     @staticmethod
     async def finish(session: AsyncSession, task: AgentTask, status: str, *, outcome: str | None = None,
                      error: str | None = None) -> None:
+        assert status in FINAL_STATUSES, status
         task.status = status
         task.outcome = outcome
         task.error = error
-        task.finished_at = _now()
+        task.finished_at = func.now()
         await session.flush()
         await _notify_event(session, task, None)
         await session.commit()
+        await session.refresh(task)
         log.info("agent_task_finished", task_id=str(task.id), status=status, outcome=outcome)
 
     @staticmethod
@@ -147,6 +181,9 @@ class AgentTaskService:
 
     @staticmethod
     async def is_cancel_requested(session: AsyncSession, task_id: uuid.UUID) -> bool:
-        return bool((await session.execute(
+        result = (await session.execute(
             select(AgentTask.cancel_requested).where(AgentTask.id == task_id)
-        )).scalar_one())
+        )).scalar_one_or_none()
+        # A deleted task must stop, not spin forever waiting for a cancel flag
+        # that no longer has a row to live on.
+        return True if result is None else bool(result)

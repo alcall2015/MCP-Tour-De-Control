@@ -58,6 +58,7 @@ class AgentTask(Base):
         Index("ix_agent_task_agent_created", "agent_id", text("created_at DESC")),
         Index("ix_agent_task_queue", "created_at", postgresql_where=text("status = 'queued'")),
         Index("ix_agent_task_running", "agent_id", postgresql_where=text("status = 'running'")),
+        Index("uq_agent_task_open_per_agent", "agent_id", unique=True, postgresql_where=text("status IN ('queued','running')")),
     )
 
 

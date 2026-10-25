@@ -68,7 +68,9 @@ Adds `cron_expr` String(100) nullable. Nothing else changes.
 Indexes: `ix_agent_task_agent_created (agent_id, created_at DESC)`;
 `ix_agent_task_queue (created_at) WHERE status = 'queued'`;
 `ix_agent_task_running (agent_id) WHERE status = 'running'` (serves the
-per-agent exclusivity check).
+per-agent exclusivity check);
+`uq_agent_task_open_per_agent (agent_id) UNIQUE WHERE status IN ('queued','running')`
+(enforces it).
 
 Snapshots exist so that editing an agent never changes a task already in
 flight; the task page shows the snapshot, not the current agent.
@@ -132,19 +134,22 @@ SET status = 'running', worker_id = :worker_id,
     started_at = now(), heartbeat_at = now()
 WHERE id = (
   SELECT t.id FROM agent_task t
+  JOIN agent a ON a.id = t.agent_id
   WHERE t.status = 'queued'
     AND NOT EXISTS (SELECT 1 FROM agent_task r
                     WHERE r.agent_id = t.agent_id AND r.status = 'running')
   ORDER BY t.created_at
-  FOR UPDATE SKIP LOCKED
+  FOR UPDATE OF t, a SKIP LOCKED
   LIMIT 1)
 RETURNING id;
 ```
 
-One task per agent at a time is guaranteed by the query itself, across any
-number of workers. The worker keeps up to `AGENT_WORKER_CONCURRENCY` tasks in
-flight (an `asyncio.Semaphore`), wakes on `LISTEN agent_task_queued`, and polls
-every 5 seconds as a fallback.
+At most one `queued` or `running` task per agent is enforced by the partial
+unique index `uq_agent_task_open_per_agent`; the claim query additionally
+locks the agent row (`FOR UPDATE OF t, a SKIP LOCKED`) so concurrent claimers
+cannot pass the `NOT EXISTS` check together. The worker keeps up to
+`AGENT_WORKER_CONCURRENCY` tasks in flight (an `asyncio.Semaphore`), wakes on
+`LISTEN agent_task_queued`, and polls every 5 seconds as a fallback.
 
 ### Heartbeat and lost workers
 

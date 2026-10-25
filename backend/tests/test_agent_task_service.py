@@ -6,6 +6,7 @@ os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5
 
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import Agent, AgentTask, AgentTaskStep, McpServer
@@ -40,30 +41,91 @@ async def test_enqueue_rejects_inactive_agent_and_duplicates(session):
         await AgentTaskService.enqueue(session, active, objective="second", trigger="cron")
 
 
-async def test_claim_is_exclusive_per_agent_and_across_workers(setup_db, session):
+async def test_second_open_task_per_agent_is_rejected_by_the_database(session):
+    """The partial unique index, not just the enqueue() pre-check, is what makes this impossible."""
+    agent = await make_agent(session)
+    agent_id = agent.id  # captured before the rollback below expires `agent`
+    t1 = AgentTask(agent_id=agent_id, trigger="manual", objective="1", instructions="", max_steps=5, timeout_seconds=60)
+    session.add(t1)
+    await session.commit()
+    t1_id = t1.id  # captured before the rollback below expires t1
+
+    t2 = AgentTask(agent_id=agent_id, trigger="manual", objective="2", instructions="", max_steps=5, timeout_seconds=60)
+    session.add(t2)
+    with pytest.raises(IntegrityError):
+        await session.commit()
+    await session.rollback()
+
+    await AgentTaskService.finish(session, await session.get(AgentTask, t1_id), "completed", outcome="success")
+    t3 = AgentTask(agent_id=agent_id, trigger="manual", objective="3", instructions="", max_steps=5, timeout_seconds=60)
+    session.add(t3)
+    await session.commit()  # the agent's only open task is gone now, so this succeeds
+
+
+async def test_claim_under_real_overlap_never_runs_two_tasks_of_one_agent(setup_db, session):
+    """Reproduces the real race: a claimer holds its transaction open (uncommitted) while
+    a second, independent session claims concurrently. The agent-row lock in the claim SQL
+    (FOR UPDATE OF t, a) must let the second claimer skip straight to a different agent's
+    task rather than block forever or double-claim."""
     a1 = await make_agent(session, "a1")
     a2 = await make_agent(session, "a2")
-    t1 = await AgentTaskService.enqueue(session, a1, objective="1", trigger="manual")
-    t2 = await AgentTaskService.enqueue(session, a2, objective="2", trigger="manual")
-    # a second task of a1 cannot be enqueued while t1 is queued, so insert it directly
-    t3 = AgentTask(agent_id=a1.id, trigger="manual", objective="3", instructions="", max_steps=5, timeout_seconds=60)
-    session.add(t3)
-    await session.commit()
+    a3 = await make_agent(session, "a3")
+    await AgentTaskService.enqueue(session, a1, objective="1", trigger="manual")
+    await AgentTaskService.enqueue(session, a2, objective="2", trigger="manual")
+    await AgentTaskService.enqueue(session, a3, objective="3", trigger="manual")
+
+    claim_sql = text("""
+        UPDATE agent_task
+        SET status = 'running', worker_id = :worker_id, started_at = now(), heartbeat_at = now()
+        WHERE id = (
+            SELECT t.id FROM agent_task t
+            JOIN agent a ON a.id = t.agent_id
+            WHERE t.status = 'queued'
+              AND NOT EXISTS (SELECT 1 FROM agent_task r WHERE r.agent_id = t.agent_id AND r.status = 'running')
+            ORDER BY t.created_at
+            FOR UPDATE OF t, a SKIP LOCKED
+            LIMIT 1)
+        RETURNING id
+    """)
 
     factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as s1, factory() as s2, factory() as s3:
-        c1, c2, c3 = await asyncio.gather(
-            AgentTaskService.claim(s1, "w1"), AgentTaskService.claim(s2, "w2"), AgentTaskService.claim(s3, "w3"))
-    claimed = {c.id for c in (c1, c2, c3) if c}
-    assert claimed == {t1.id, t2.id}           # t3 waits: its agent already has a running task
-    assert {c.worker_id for c in (c1, c2, c3) if c} == {"w1", "w2"} or len(claimed) == 2
-    for c in (c1, c2, c3):
-        if c:
-            assert c.status == "running" and c.started_at is not None and c.heartbeat_at is not None
+    async with setup_db.connect() as conn:
+        held_row = (await conn.execute(claim_sql, {"worker_id": "holder"})).first()
+        assert held_row is not None
+        held_agent_id = (await conn.execute(
+            text("SELECT agent_id FROM agent_task WHERE id = :id"), {"id": held_row[0]}
+        )).scalar_one()
+        # conn's transaction is still open (no commit yet): this is the uncommitted running
+        # row that a buggy NOT EXISTS check would not see.
 
-    await AgentTaskService.finish(session, await session.get(AgentTask, t1.id), "completed", outcome="success")
-    assert (await AgentTaskService.claim(session, "w4")).id == t3.id
-    assert await AgentTaskService.claim(session, "w5") is None
+        async with factory() as s2:
+            second = await asyncio.wait_for(AgentTaskService.claim(s2, "w2"), timeout=5)
+        assert second is not None
+        assert second.agent_id != held_agent_id
+
+        await conn.commit()
+
+    rows = (await session.execute(select(AgentTask.agent_id).where(AgentTask.status == "running"))).scalars().all()
+    assert len(rows) == 2
+    assert len(set(rows)) == 2  # exactly one running row per agent, never two for the same one
+
+
+async def test_concurrent_enqueue_only_one_wins(setup_db, session):
+    agent = await make_agent(session)
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s1, factory() as s2:
+        a1, a2 = await s1.get(Agent, agent.id), await s2.get(Agent, agent.id)
+        results = await asyncio.gather(
+            AgentTaskService.enqueue(s1, a1, objective="x", trigger="manual"),
+            AgentTaskService.enqueue(s2, a2, objective="y", trigger="cron"),
+            return_exceptions=True,
+        )
+    successes = [r for r in results if isinstance(r, AgentTask)]
+    failures = [r for r in results if isinstance(r, TaskConflict)]
+    assert len(successes) == 1 and len(failures) == 1
+
+    rows = (await session.execute(select(AgentTask).where(AgentTask.agent_id == agent.id))).scalars().all()
+    assert len(rows) == 1
 
 
 async def test_sweep_marks_only_stale_running_tasks(session):
@@ -86,10 +148,40 @@ async def test_sweep_marks_only_stale_running_tasks(session):
     assert [s.kind for s in steps] == ["error"] and steps[0].payload["phase"] == "claim"
 
 
+async def test_sweep_handles_null_heartbeat_and_skips_locked(setup_db, session):
+    a1 = await make_agent(session, "a1")
+    a2 = await make_agent(session, "a2")
+    null_hb = AgentTask(agent_id=a1.id, trigger="manual", objective="n", instructions="", max_steps=5, timeout_seconds=60,
+                        status="running", worker_id="dead", heartbeat_at=None,
+                        started_at=datetime.now(timezone.utc) - timedelta(minutes=10))
+    locked = AgentTask(agent_id=a2.id, trigger="manual", objective="l", instructions="", max_steps=5, timeout_seconds=60,
+                       status="running", worker_id="dead2",
+                       started_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+                       heartbeat_at=datetime.now(timezone.utc) - timedelta(minutes=10))
+    session.add_all([null_hb, locked])
+    await session.commit()
+
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as holder:
+        await holder.execute(select(AgentTask.id).where(AgentTask.id == locked.id).with_for_update())
+        # holder's transaction stays open, holding the row lock on `locked`.
+
+        swept = await AgentTaskService.sweep_stale(session, older_than_seconds=90)
+        assert swept == 1
+
+        await holder.rollback()
+
+    await session.refresh(null_hb)
+    await session.refresh(locked)
+    assert null_hb.status == "failed" and null_hb.error == "worker lost"
+    assert locked.status == "running"
+
+
 async def test_record_step_increments_seq_and_totals(session):
     agent = await make_agent(session)
     task = await AgentTaskService.enqueue(session, agent, objective="o", trigger="manual")
     s1 = await AgentTaskService.record_step(session, task, "plan", {"steps": []}, prompt=[{"role": "system", "content": "p"}], tokens_in=10, tokens_out=5)
+    assert task.step_count == 1 and task.tokens_in == 10 and task.tokens_out == 5  # record_step refreshes task itself
     s2 = await AgentTaskService.record_step(session, task, "tool_call", {"tool": "t"}, duration_ms=12)
     assert (s1.seq, s2.seq) == (1, 2)
     await session.refresh(task)
