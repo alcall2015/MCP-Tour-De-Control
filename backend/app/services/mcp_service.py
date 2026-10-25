@@ -15,7 +15,13 @@ def _build_http_transport(url: str, api_key_encrypted: str | None = None) -> Str
         key = decrypt_value(api_key_encrypted)
         headers["Authorization"] = f"Bearer {key}"
         headers["X-API-Key"] = key
-    return StreamableHttpTransport(url, headers=headers)
+    transport = StreamableHttpTransport(url, headers=headers)
+    # FastMCP normalizes HTTP URLs by appending a trailing slash.  Some MCP
+    # servers (notably Silo) expose a strict endpoint and redirect that slash
+    # variant to another route, which terminates the MCP session.  Preserve the
+    # exact endpoint the operator configured instead.
+    transport.url = url
+    return transport
 
 
 class McpService:
