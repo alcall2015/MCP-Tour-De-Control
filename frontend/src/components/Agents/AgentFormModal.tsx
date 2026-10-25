@@ -4,6 +4,7 @@ import { createAgent, listMcpServers, updateAgent } from "../../lib/api";
 import type { Agent, AgentCreate } from "../../lib/api";
 import { Modal } from "../ui/Modal";
 import { MutationError } from "../ui/MutationError";
+import { CronPicker } from "../Prompts/CronPicker";
 
 interface Props {
   open: boolean;
@@ -27,6 +28,8 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
   const [serverIds, setServerIds] = useState<string[]>([]);
   const [maxSteps, setMaxSteps] = useState<number>(LIMITS.steps.def);
   const [timeoutSeconds, setTimeoutSeconds] = useState<number>(LIMITS.timeout.def);
+  const [scheduled, setScheduled] = useState(false);
+  const [cronExpr, setCronExpr] = useState("0 8 * * *");
 
   // Re-seed the fields each time the modal opens, for a new agent or an existing one.
   useEffect(() => {
@@ -38,6 +41,8 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
     setServerIds(agent?.mcp_servers.map((s) => s.id) ?? []);
     setMaxSteps(agent?.max_steps ?? LIMITS.steps.def);
     setTimeoutSeconds(agent?.timeout_seconds ?? LIMITS.timeout.def);
+    setScheduled(Boolean(agent?.cron_expr));
+    setCronExpr(agent?.cron_expr ?? "0 8 * * *");
   }, [open, agent]);
 
   const mutation = useMutation({
@@ -65,6 +70,7 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
       max_steps: maxSteps,
       timeout_seconds: timeoutSeconds,
       mcp_server_ids: serverIds,
+      cron_expr: scheduled ? cronExpr : null,
     });
   };
 
@@ -106,6 +112,20 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
                   {!s.enabled && <span className="text-xs" style={{ color: "var(--text-muted)" }}>disabled</span>}
                 </label>
               ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2.5 text-sm cursor-pointer" style={{ color: "var(--text-primary)" }}>
+            <input type="checkbox" checked={scheduled} onChange={(e) => setScheduled(e.target.checked)} />
+            <span>Run on a schedule</span>
+            <span className="text-xs" style={labelStyle}>{scheduled ? "" : "No schedule: manual runs only"}</span>
+          </label>
+          {scheduled && (
+            <div className="mt-3">
+              <CronPicker value={cronExpr} onChange={setCronExpr} />
+              <p className="mt-1 text-xs" style={labelStyle}>Each tick queues one task; ticks are skipped while a task is already queued or running.</p>
             </div>
           )}
         </div>
