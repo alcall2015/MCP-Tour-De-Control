@@ -6,8 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChatMessage, Config, Conversation, McpServer
-from app.services.mcp_service import McpService, _build_http_transport
+from app.services.llm_runtime import MAX_TOOL_RESULT_LEN, build_tool_defs, call_llm, call_mcp_tool
 from app.utils.crypto import decrypt_value
+from app.utils.sse import sse_frame as _sse
 
 log = structlog.get_logger()
 
@@ -25,38 +26,7 @@ Quand tu generes un script, mets-le dans un bloc ```python.
 Reponds en francais. Sois concis et professionnel."""
 
 MAX_HISTORY = 20
-MAX_TOOL_RESULT_LEN = 2000
 MAX_TOOL_ROUNDS = 8
-
-# Keep only the portable JSON Schema subset accepted by every configured
-# function-calling provider.  In particular, Gemini rejects validation and
-# metadata keywords such as `$schema`, `minimum`, and `additionalProperties`.
-_FUNCTION_SCHEMA_FIELDS = {"type", "description", "properties", "required", "items", "enum"}
-
-
-def _clean_schema(schema: dict) -> dict:
-    """Reduce an MCP schema to portable LLM function-calling fields."""
-    cleaned = {}
-    for k, v in schema.items():
-        if k not in _FUNCTION_SCHEMA_FIELDS:
-            continue
-        if isinstance(v, dict):
-            cleaned[k] = _clean_schema(v)
-        elif isinstance(v, list):
-            cleaned[k] = [_clean_schema(i) if isinstance(i, dict) else i for i in v]
-        else:
-            cleaned[k] = v
-
-    # A property can have been removed above when it was expressed through a
-    # JSON Schema reference.  Gemini rejects a `required` entry without a
-    # matching property definition.
-    properties = cleaned.get("properties")
-    if "required" in cleaned:
-        if isinstance(properties, dict):
-            cleaned["required"] = [name for name in cleaned["required"] if name in properties]
-        else:
-            cleaned.pop("required")
-    return cleaned
 
 
 class ChatService:
@@ -81,52 +51,8 @@ class ChatService:
     @staticmethod
     async def _get_mcp_tools(session: AsyncSession) -> tuple[list[dict], dict[str, McpServer]]:
         """Return LLM tool definitions and a map of tool_name -> McpServer."""
-        servers_result = await session.execute(
-            select(McpServer).where(McpServer.enabled == True)
-        )
-        tools = []
-        tool_server_map = {}
-        for server in servers_result.scalars().all():
-            server_tools = await McpService.get_server_tools(server)
-            for t in server_tools:
-                params = _clean_schema(t.get("input_schema") or {"type": "object", "properties": {}})
-                tool_def = {
-                    "type": "function",
-                    "function": {
-                        "name": t["name"],
-                        "description": f"[{server.name}] {t.get('description', '')}",
-                        "parameters": params,
-                    },
-                }
-                tools.append(tool_def)
-                tool_server_map[t["name"]] = server
-        return tools, tool_server_map
-
-    @staticmethod
-    async def _call_mcp_tool(tool_name: str, args: dict, server: McpServer) -> str:
-        """Execute an MCP tool and return the result as a string."""
-        try:
-            from fastmcp import Client
-            from fastmcp.client.transports import StdioTransport
-
-            if server.transport == "http" and server.url:
-                transport = _build_http_transport(server.url, server.api_key)
-                async with Client(transport) as client:
-                    result = await client.call_tool(tool_name, args)
-            elif server.transport == "stdio" and server.command:
-                transport = StdioTransport(command=server.command, args=server.args or [])
-                async with Client(transport) as client:
-                    result = await client.call_tool(tool_name, args)
-            else:
-                return json.dumps({"error": f"Server {server.name} not configured properly"})
-
-            text = result[0].text if result else ""
-            if len(text) > MAX_TOOL_RESULT_LEN:
-                text = text[:MAX_TOOL_RESULT_LEN] + f"\n[truncated, {len(text)} chars total]"
-            return text
-        except Exception as e:
-            log.error("MCP tool call failed", tool=tool_name, error=str(e))
-            return json.dumps({"error": str(e)})
+        servers = (await session.execute(select(McpServer).where(McpServer.enabled == True))).scalars().all()
+        return await build_tool_defs(list(servers))
 
     @staticmethod
     async def stream_response(
@@ -165,9 +91,8 @@ class ChatService:
 
         try:
             for _round in range(MAX_TOOL_ROUNDS):
-                text_chunk, tool_calls_batch = await _stream_llm(
-                    provider, model, api_key, messages, tools, stream_callback=lambda chunk: None
-                )
+                result = await call_llm(provider, model, api_key, messages, tools)
+                text_chunk, tool_calls_batch = result.text, result.tool_calls
 
                 # Yield text as SSE event
                 if text_chunk:
@@ -186,7 +111,7 @@ class ChatService:
                     yield _sse("tool_call", {"tool": tool_name, "server": server.name if server else "unknown", "args": tool_args})
 
                     if server:
-                        result_text = await ChatService._call_mcp_tool(tool_name, tool_args, server)
+                        result_text = await call_mcp_tool(tool_name, tool_args, server)
                     else:
                         result_text = json.dumps({"error": f"Unknown tool: {tool_name}"})
 
@@ -207,9 +132,8 @@ class ChatService:
                 # Loop exhausted MAX_TOOL_ROUNDS without ever breaking, i.e. the model
                 # still wanted to call tools on the very last round. Force one more,
                 # tool-less turn so it must write an answer instead of going silent.
-                text_chunk, dropped_tool_calls = await _stream_llm(
-                    provider, model, api_key, messages, None, stream_callback=lambda chunk: None
-                )
+                result = await call_llm(provider, model, api_key, messages, None)
+                text_chunk, dropped_tool_calls = result.text, result.tool_calls
                 if dropped_tool_calls:
                     log.warning("Synthesis turn discarded tool calls", count=len(dropped_tool_calls))
                 if text_chunk:
@@ -247,171 +171,3 @@ class ChatService:
         await session.commit()
 
         yield _sse("done", {})
-
-
-async def _stream_llm(provider, model, api_key, messages, tools, stream_callback):
-    """Call LLM with streaming, return (text, tool_calls).
-    Uses OpenAI-compatible format for all providers."""
-
-    if provider == "openai":
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-        kwargs = {"model": model, "messages": messages, "stream": True}
-        if tools:
-            kwargs["tools"] = tools
-        stream = client.chat.completions.create(**kwargs)
-
-        text = ""
-        tool_calls_acc = {}
-        for chunk in stream:
-            delta = chunk.choices[0].delta
-            if delta.content:
-                text += delta.content
-                stream_callback(delta.content)
-            if delta.tool_calls:
-                for tc in delta.tool_calls:
-                    idx = tc.index
-                    if idx not in tool_calls_acc:
-                        tool_calls_acc[idx] = {"name": "", "args": ""}
-                    if tc.function.name:
-                        tool_calls_acc[idx]["name"] = tc.function.name
-                    if tc.function.arguments:
-                        tool_calls_acc[idx]["args"] += tc.function.arguments
-
-        parsed_calls = []
-        for tc in tool_calls_acc.values():
-            try:
-                args = json.loads(tc["args"]) if tc["args"] else {}
-            except json.JSONDecodeError:
-                args = {}
-            parsed_calls.append({"name": tc["name"], "args": args})
-
-        return text, parsed_calls if parsed_calls else None
-
-    elif provider == "anthropic":
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        # Convert OpenAI tool format to Anthropic
-        anthropic_tools = []
-        for t in (tools or []):
-            anthropic_tools.append({
-                "name": t["function"]["name"],
-                "description": t["function"]["description"],
-                "input_schema": t["function"]["parameters"],
-            })
-        # Convert messages: extract system, handle tool messages
-        system_text = ""
-        anthropic_msgs = []
-        for m in messages:
-            if m["role"] == "system":
-                system_text = m["content"]
-            elif m["role"] == "tool":
-                anthropic_msgs.append({"role": "user", "content": [
-                    {"type": "tool_result", "tool_use_id": m.get("tool_call_id", ""), "content": m["content"]}
-                ]})
-            elif m["role"] == "assistant" and m.get("tool_calls"):
-                content_blocks = []
-                for tc in m["tool_calls"]:
-                    content_blocks.append({
-                        "type": "tool_use",
-                        "id": tc["id"],
-                        "name": tc["function"]["name"],
-                        "input": json.loads(tc["function"]["arguments"]),
-                    })
-                anthropic_msgs.append({"role": "assistant", "content": content_blocks})
-            else:
-                anthropic_msgs.append({"role": m["role"], "content": m.get("content") or ""})
-
-        kwargs = {"model": model, "max_tokens": 4096, "messages": anthropic_msgs}
-        if system_text:
-            kwargs["system"] = system_text
-        if anthropic_tools:
-            kwargs["tools"] = anthropic_tools
-
-        with client.messages.stream(**kwargs) as stream:
-            text = ""
-            tool_calls = []
-            for event in stream:
-                if hasattr(event, 'type'):
-                    if event.type == 'content_block_delta':
-                        if hasattr(event.delta, 'text'):
-                            text += event.delta.text
-                            stream_callback(event.delta.text)
-            # Check final message for tool use
-            response = stream.get_final_message()
-            for block in response.content:
-                if block.type == "tool_use":
-                    tool_calls.append({"name": block.name, "args": block.input})
-
-        return text, tool_calls if tool_calls else None
-
-    elif provider == "google":
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-
-        # Convert tools to Google format
-        google_tools = None
-        if tools:
-            function_declarations = []
-            for t in tools:
-                params = t["function"]["parameters"]
-                function_declarations.append(genai.types.FunctionDeclaration(
-                    name=t["function"]["name"],
-                    description=t["function"]["description"],
-                    parameters=params if params.get("properties") else None,
-                ))
-            google_tools = [genai.types.Tool(function_declarations=function_declarations)]
-
-        model_obj = genai.GenerativeModel(model, tools=google_tools)
-
-        # Build flat prompt from messages (avoid Gemini chat history issues with function calls)
-        parts = []
-        for m in messages:
-            if m["role"] == "system":
-                parts.append(f"[System] {m['content']}")
-            elif m["role"] == "user":
-                parts.append(f"[User] {m['content']}")
-            elif m["role"] == "assistant":
-                if m.get("tool_calls"):
-                    for tc in m["tool_calls"]:
-                        fn = tc.get("function", tc)
-                        fn_name = fn.get("name", "unknown")
-                        parts.append(f"[Assistant called tool: {fn_name}]")
-                elif m.get("content"):
-                    parts.append(f"[Assistant] {m['content']}")
-            elif m["role"] == "tool":
-                fn_name = m.get("tool_call_id", "").replace("call_", "")
-                content = m["content"]
-                if len(content) > MAX_TOOL_RESULT_LEN:
-                    content = content[:MAX_TOOL_RESULT_LEN] + f"\n[truncated, {len(m['content'])} chars total]"
-                parts.append(f"[Tool result for {fn_name}]\n{content}")
-        prompt = "\n\n".join(parts)
-        # Instruct the model to use the tool results already provided
-        prompt += "\n\n[System] If you already have tool results above that answer the user's question, use them directly. Do NOT call the same tool again."
-
-        response = model_obj.generate_content(prompt, stream=True)
-        text = ""
-        tool_calls = []
-        for chunk in response:
-            try:
-                if chunk.text:
-                    text += chunk.text
-                    stream_callback(chunk.text)
-            except ValueError:
-                pass
-            if hasattr(chunk, 'candidates') and chunk.candidates:
-                for candidate in chunk.candidates:
-                    if hasattr(candidate, 'content') and candidate.content.parts:
-                        for part in candidate.content.parts:
-                            if hasattr(part, 'function_call') and part.function_call:
-                                fc = part.function_call
-                                tool_calls.append({"name": fc.name, "args": dict(fc.args)})
-
-        return text, tool_calls if tool_calls else None
-
-    else:
-        raise ValueError(f"Unsupported provider: {provider}")
-
-
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"

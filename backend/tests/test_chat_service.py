@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.models import ChatMessage, Config, Conversation
 from app.services import chat_service
 from app.services.chat_service import MAX_TOOL_ROUNDS, ChatService
+from app.services.llm_runtime import LlmResult
 from app.utils.crypto import encrypt_value
 
 
@@ -39,8 +40,8 @@ async def _consume(session, conversation_id):
 async def test_finishes_within_budget_answers_normally_without_extra_call(session):
     conv = await _make_conversation_and_config(session)
 
-    mock_stream_llm = AsyncMock(return_value=("Bonjour !", None))
-    with patch.object(chat_service, "_stream_llm", mock_stream_llm):
+    mock_stream_llm = AsyncMock(return_value=LlmResult("Bonjour !", []))
+    with patch.object(chat_service, "call_llm", mock_stream_llm):
         events = await _consume(session, conv.id)
 
     # Only one LLM call needed: the model answered without requesting tools.
@@ -66,11 +67,11 @@ async def test_exhausted_budget_triggers_synthesis_turn_that_reaches_user(sessio
     # Every round the model keeps wanting to call a tool, so the loop never
     # breaks and runs out its full budget. The final (synthesis) call is
     # answered with tools=None and must return text with no tool calls.
-    tool_round = ("", [{"name": "list_sims", "args": {"gateway": "guinee-red24-01"}}])
-    synthesis_round = ("Voici les SIM trouvees.", None)
+    tool_round = LlmResult("", [{"name": "list_sims", "args": {"gateway": "guinee-red24-01"}}])
+    synthesis_round = LlmResult("Voici les SIM trouvees.", [])
     mock_stream_llm = AsyncMock(side_effect=[tool_round] * MAX_TOOL_ROUNDS + [synthesis_round])
 
-    with patch.object(chat_service, "_stream_llm", mock_stream_llm):
+    with patch.object(chat_service, "call_llm", mock_stream_llm):
         events = await _consume(session, conv.id)
 
     # MAX_TOOL_ROUNDS regular rounds + exactly one synthesis round.
@@ -96,13 +97,13 @@ async def test_exhausted_budget_triggers_synthesis_turn_that_reaches_user(sessio
 async def test_synthesis_turn_returning_nothing_emits_french_fallback(session):
     conv = await _make_conversation_and_config(session)
 
-    tool_round = ("", [{"name": "list_sims", "args": {}}])
-    empty_synthesis_round = ("", None)
+    tool_round = LlmResult("", [{"name": "list_sims", "args": {}}])
+    empty_synthesis_round = LlmResult("", [])
     mock_stream_llm = AsyncMock(
         side_effect=[tool_round] * MAX_TOOL_ROUNDS + [empty_synthesis_round]
     )
 
-    with patch.object(chat_service, "_stream_llm", mock_stream_llm):
+    with patch.object(chat_service, "call_llm", mock_stream_llm):
         events = await _consume(session, conv.id)
 
     assert mock_stream_llm.call_count == MAX_TOOL_ROUNDS + 1
@@ -129,11 +130,11 @@ async def test_all_max_tool_rounds_are_actually_attempted(session):
     # tool-round budget is a product decision and any silent change should break a test.
     assert MAX_TOOL_ROUNDS == 8
 
-    tool_round = ("", [{"name": "list_sims", "args": {}}])
-    synthesis_round = ("Reponse finale.", None)
+    tool_round = LlmResult("", [{"name": "list_sims", "args": {}}])
+    synthesis_round = LlmResult("Reponse finale.", [])
     mock_stream_llm = AsyncMock(side_effect=[tool_round] * MAX_TOOL_ROUNDS + [synthesis_round])
 
-    with patch.object(chat_service, "_stream_llm", mock_stream_llm):
+    with patch.object(chat_service, "call_llm", mock_stream_llm):
         await _consume(session, conv.id)
 
     # Asserting the exact count guards against silently shrinking the budget:
