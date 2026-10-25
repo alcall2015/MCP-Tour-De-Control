@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import settings
 from app.models import Agent, AgentTask, AgentTaskStep, Config, McpServer
 from app.services.agent_runner import derive_outcome, parse_json_object, run_task
 from app.services.agent_task_service import AgentTaskService
@@ -24,7 +25,7 @@ REPORT = {"summary": "done", "actions": [{"step_seq": 3, "description": "listed 
 
 
 async def setup(session, *, max_steps=5, timeout=60, server_enabled=True, with_key=True):
-    session.add(Config(llm_provider="openai", llm_model="gpt-x", api_key=encrypt_value("sk") if with_key else None))
+    session.add(Config(llm_provider="openai", llm_model="gpt-x", api_key=encrypt_value("sk-live-SENTINEL-DO-NOT-LEAK") if with_key else None))
     server = McpServer(name="srv", transport="http", url="http://x", enabled=server_enabled)
     agent = Agent(name="a", objective="Inspect x", instructions="Be terse", status="active",
                   max_steps=max_steps, timeout_seconds=timeout, mcp_servers=[server])
@@ -100,7 +101,7 @@ async def test_nominal_run_writes_every_step_and_completes(setup_db, session):
 
     await session.refresh(task)
     assert task.status == "completed" and task.outcome == "success" and task.error is None
-    assert task.plan == PLAN and task.critique == CRITIQUE and task.report["summary"] == "done"
+    assert task.plan == PLAN and task.critique == {**CRITIQUE, "limit_hit": None} and task.report["summary"] == "done"
     assert task.finished_at is not None and task.tokens_in == 22 and task.tokens_out == 5
 
     steps = await steps_of(session, task.id)
@@ -115,7 +116,10 @@ async def test_nominal_run_writes_every_step_and_completes(setup_db, session):
     assert llm.calls[0]["tools"] is None and llm.calls[1]["tools"] and llm.calls[3]["tools"] is None
     # the second loop turn saw the tool result in its history
     assert any(m.get("role") == "tool" and "items" in m["content"] for m in llm.calls[2]["messages"])
-    assert "sk" not in json.dumps([c["messages"] for c in llm.calls])
+    # a distinctive sentinel (not the plain "sk" prefix, which also matches ordinary
+    # words like "task" and "risks" in the prompts) proves the decrypted key never
+    # leaks into any prompt sent to the model
+    assert "SENTINEL-DO-NOT-LEAK" not in json.dumps([c["messages"] for c in llm.calls])
 
 
 async def test_max_steps_stops_the_loop_and_is_reported_to_the_critique(setup_db, session):
@@ -138,7 +142,7 @@ async def test_timeout_stops_the_loop(setup_db, session):
     now = [0.0]
 
     async def slow_tool(name, args, server):
-        now[0] = 100.0                                 # the first tool call eats the whole budget
+        now[0] = 20.0                                   # past the 10s timeout, well inside the final grace window
         return "{}"
     llm = scripted(J(PLAN), LlmResult("more", [{"name": "list_x", "args": {}}]), J(CRITIQUE), J(REPORT))
     factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
@@ -206,3 +210,77 @@ async def test_missing_api_key_fails_before_any_call(setup_db, session):
     await run_task(task.id, llm=llm, tool=fake_tool, tool_defs=fake_tool_defs, session_factory=factory)
     await session.refresh(task)
     assert task.status == "failed" and "LLM not configured" in task.error and llm.calls == []
+
+
+async def test_two_tool_calls_in_one_round_get_distinct_ids(setup_db, session):
+    task = await setup(session)
+    llm = scripted(
+        J(PLAN),
+        LlmResult("go", [{"name": "list_x", "args": {"a": 1}}, {"name": "list_x", "args": {"a": 2}}]),
+        LlmResult("done", []),
+        J(CRITIQUE),
+        J(REPORT),
+    )
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    await run_task(task.id, llm=llm, tool=fake_tool, tool_defs=fake_tool_defs, session_factory=factory)
+    await session.refresh(task)
+    assert task.status == "completed"
+    steps = await steps_of(session, task.id)
+    assert [s.kind for s in steps].count("tool_call") == 2
+
+    # the next turn's history must carry the assistant's two tool_calls and the
+    # two tool results that answered them, all three ids matching and distinct
+    next_turn_messages = llm.calls[2]["messages"]
+    assistant_msg = next(m for m in next_turn_messages if m.get("role") == "assistant" and m.get("tool_calls"))
+    call_ids = [tc["id"] for tc in assistant_msg["tool_calls"]]
+    assert len(call_ids) == 2 and call_ids[0] != call_ids[1]
+    tool_msgs = [m for m in next_turn_messages if m.get("role") == "tool"]
+    assert [m["tool_call_id"] for m in tool_msgs] == call_ids
+
+
+async def test_invalid_critique_twice_fails_with_phase_critique(setup_db, session):
+    task = await setup(session)
+    llm = scripted(J(PLAN), LlmResult("done", []), LlmResult("not json", []), LlmResult("still not", []))
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    await run_task(task.id, llm=llm, tool=fake_tool, tool_defs=fake_tool_defs, session_factory=factory)
+    await session.refresh(task)
+    assert task.status == "failed" and task.error.startswith("critique")
+    steps = await steps_of(session, task.id)
+    assert steps[-1].kind == "error" and steps[-1].payload["phase"] == "critique"
+
+
+async def test_invalid_report_twice_fails_with_phase_report(setup_db, session):
+    task = await setup(session)
+    llm = scripted(J(PLAN), LlmResult("done", []), J(CRITIQUE), LlmResult("not json", []), LlmResult("still not", []))
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    await run_task(task.id, llm=llm, tool=fake_tool, tool_defs=fake_tool_defs, session_factory=factory)
+    await session.refresh(task)
+    assert task.status == "failed" and task.error.startswith("report")
+    steps = await steps_of(session, task.id)
+    assert steps[-1].kind == "error" and steps[-1].payload["phase"] == "report"
+
+
+async def test_finish_is_skipped_when_task_already_final(setup_db, session):
+    task = await setup(session)
+    await AgentTaskService.finish(session, task, "failed", error="worker lost")
+    llm = scripted(J(PLAN), LlmResult("done", []), J(CRITIQUE), J(REPORT))
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    await run_task(task.id, llm=llm, tool=fake_tool, tool_defs=fake_tool_defs, session_factory=factory)
+    await session.refresh(task)
+    assert task.status == "failed" and task.error == "worker lost"
+    assert task.report is None
+
+
+async def test_grace_exhausted_fails_in_report_phase(setup_db, session):
+    task = await setup(session, timeout=10)
+    now = [0.0]
+
+    async def tool_that_exhausts_grace(name, args, server):
+        now[0] = 10 + settings.AGENT_TASK_FINAL_GRACE_SECONDS + 1
+        return "{}"
+    llm = scripted(J(PLAN), LlmResult("more", [{"name": "list_x", "args": {}}]))
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+    await run_task(task.id, llm=llm, tool=tool_that_exhausts_grace, tool_defs=fake_tool_defs,
+                   session_factory=factory, clock=lambda: now[0])
+    await session.refresh(task)
+    assert task.status == "failed" and task.error.startswith("critique")

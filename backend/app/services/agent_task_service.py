@@ -156,18 +156,23 @@ class AgentTaskService:
         return step
 
     @staticmethod
-    async def finish(session: AsyncSession, task: AgentTask, status: str, *, outcome: str | None = None,
-                     error: str | None = None) -> None:
+    async def finish(session, task, status, *, outcome=None, error=None) -> bool:
         assert status in FINAL_STATUSES, status
-        task.status = status
-        task.outcome = outcome
-        task.error = error
-        task.finished_at = func.now()
-        await session.flush()
+        result = await session.execute(
+            update(AgentTask)
+            .where(AgentTask.id == task.id, AgentTask.status.in_(("queued", "running")))
+            .values(status=status, outcome=outcome, error=error, finished_at=func.now())
+        )
+        if result.rowcount == 0:
+            await session.rollback()
+            await session.refresh(task)
+            log.warning("agent_task_finish_skipped", task_id=str(task.id), current=task.status, wanted=status)
+            return False
+        await session.refresh(task)
         await _notify_event(session, task, None)
         await session.commit()
-        await session.refresh(task)
         log.info("agent_task_finished", task_id=str(task.id), status=status, outcome=outcome)
+        return True
 
     @staticmethod
     async def request_cancel(session: AsyncSession, task: AgentTask) -> None:

@@ -44,7 +44,7 @@ class Cancelled(Exception):
 
 SYSTEM_PROMPT = """You are an autonomous agent running inside MCP Tour De Control.
 
-Objective:
+Objective of this task:
 {objective}
 
 Operator instructions (follow them exactly):
@@ -52,8 +52,8 @@ Operator instructions (follow them exactly):
 
 You work in phases. In the planning phase you answer with JSON only. In the execution phase you call the available tools to make progress and stop calling tools when the objective is reached or cannot be reached. In the critique and report phases you answer with JSON only, honestly, using only facts visible in this conversation."""
 
-PLAN_PROMPT = """Produce the plan now as a single JSON object and nothing else:
-{{"steps": [{{"title": "...", "tools": ["tool_name"]}}], "success_criteria": [{{"id": "c1", "description": "..."}}]}}
+PLAN_PROMPT = """Produce the plan for this task as a single JSON object and nothing else:
+{{"steps": [{{"title": "...", "tools": ["tool_name"]}}], "success_criteria": [{{"id": "c1", "description": "..."}}], "risks": ["..."]}}
 Available tools: {tool_names}
 Rules: at least one step, at least one success criterion with a unique id, tools only from the available list."""
 
@@ -65,7 +65,7 @@ Include every criterion id from the plan: {criteria_ids}. confidence is a number
 
 REPORT_PROMPT = """Write the final report as a single JSON object and nothing else:
 {{"summary": "...", "actions": [{{"step_seq": 0, "description": "..."}}], "evidence": ["..."], "uncertainties": ["..."], "next_steps": ["..."]}}
-step_seq refers to the numbered steps of this run: {step_index}."""
+step_seq refers to the numbered steps of this task: {step_index}."""
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -138,17 +138,16 @@ class _Run:
     async def _task(self, session) -> AgentTask:
         return await session.get(AgentTask, self.task_id)
 
-    async def _llm_json(self, phase: str, messages: list[dict], validate, *, tools=None) -> tuple[dict, LlmResult, list[dict]]:
+    async def _llm_json(self, phase: str, messages: list[dict], validate) -> tuple[dict, LlmResult, list[dict]]:
         """One JSON-returning call with a single retry that quotes the parse error."""
         attempt_messages = list(messages)
         last_error = ""
-        for attempt in range(2):
-            started = self.clock()
-            result = await self.llm(self.provider, self.model, self.api_key, attempt_messages, tools)
+        for _ in range(2):
+            result = await self.llm(self.provider, self.model, self.api_key, attempt_messages, None)
             try:
                 data = validate(parse_json_object(result.text))
                 return data, result, attempt_messages
-            except (ValueError, json.JSONDecodeError, TypeError) as exc:
+            except (ValueError, TypeError) as exc:
                 last_error = str(exc)
                 attempt_messages = attempt_messages + [
                     {"role": "assistant", "content": result.text},
@@ -187,8 +186,7 @@ class _Run:
             await session.commit()
 
             # Phase 2: tool loop
-            plan_for_exec = {"steps": plan["steps"], "success_criteria": plan["success_criteria"]}
-            self.messages.append({"role": "user", "content": EXECUTE_PROMPT + "\nPlan:\n" + json.dumps(plan_for_exec)})
+            self.messages.append({"role": "user", "content": EXECUTE_PROMPT + "\nPlan:\n" + json.dumps(plan)})
             rounds = 0
             while True:
                 if rounds >= task.max_steps:
@@ -230,17 +228,22 @@ class _Run:
             await self._finalize(session, task, plan)
 
     async def _finalize(self, session, task, plan):
-        grace_deadline = max(self.deadline, self.clock()) + settings.AGENT_TASK_FINAL_GRACE_SECONDS
+        grace_deadline = self.deadline + settings.AGENT_TASK_FINAL_GRACE_SECONDS
         if await AgentTaskService.is_cancel_requested(session, self.task_id):
             raise Cancelled()
         limit_note = f"The execution stopped because the limit '{self.limit_hit.value}' was reached. " if self.limit_hit else ""
         ids = [str(c["id"]) for c in plan["success_criteria"]]
         critique_messages = self.messages + [{"role": "user", "content": CRITIQUE_PROMPT.format(limit_note=limit_note, criteria_ids=", ".join(ids))}]
-        critique, result, used = await asyncio.wait_for(
-            self._llm_json("critique", critique_messages, lambda c: _validate_critique(c, ids)),
-            timeout=max(1.0, grace_deadline - self.clock()))
-        if self.limit_hit:
-            critique["limit_hit"] = self.limit_hit.value
+        remaining = grace_deadline - self.clock()
+        if remaining <= 0:
+            raise RunFailed("critique", "final phases exceeded the grace period")
+        try:
+            critique, result, used = await asyncio.wait_for(
+                self._llm_json("critique", critique_messages, lambda c: _validate_critique(c, ids)),
+                timeout=remaining)
+        except asyncio.TimeoutError:
+            raise RunFailed("critique", "final phases exceeded the grace period")
+        critique["limit_hit"] = self.limit_hit.value if self.limit_hit else None
         await AgentTaskService.record_step(session, task, "critique", critique, prompt=used, tokens_in=result.tokens_in, tokens_out=result.tokens_out)
         task.critique = critique
         await session.commit()
@@ -248,9 +251,15 @@ class _Run:
         await session.refresh(task, ["steps"])
         step_index = "; ".join(f"{s.seq}: {s.kind}" + (f" {s.payload.get('tool')}" if s.kind == "tool_call" else "") for s in task.steps)
         report_messages = self.messages + [{"role": "user", "content": REPORT_PROMPT.format(step_index=step_index or "(none)")}]
-        report, result, used = await asyncio.wait_for(
-            self._llm_json("report", report_messages, _validate_report),
-            timeout=max(1.0, grace_deadline - self.clock()))
+        remaining = grace_deadline - self.clock()
+        if remaining <= 0:
+            raise RunFailed("report", "final phases exceeded the grace period")
+        try:
+            report, result, used = await asyncio.wait_for(
+                self._llm_json("report", report_messages, _validate_report),
+                timeout=remaining)
+        except asyncio.TimeoutError:
+            raise RunFailed("report", "final phases exceeded the grace period")
         await AgentTaskService.record_step(session, task, "report", report, prompt=used, tokens_in=result.tokens_in, tokens_out=result.tokens_out)
         task.report = report
         await AgentTaskService.finish(session, task, "completed", outcome=derive_outcome(critique["criteria"]))
@@ -271,21 +280,25 @@ async def run_task(task_id: uuid.UUID, *, llm=call_llm, tool=call_mcp_tool, tool
         await run.run()
     except Cancelled:
         async with session_factory() as session:
-            await AgentTaskService.finish(session, await session.get(AgentTask, task_id), "cancelled")
+            task = await session.get(AgentTask, task_id)
+            if task is None:
+                return
+            if task.status in ("queued", "running"):
+                await AgentTaskService.finish(session, task, "cancelled")
     except RunFailed as exc:
         async with session_factory() as session:
             task = await session.get(AgentTask, task_id)
-            await AgentTaskService.record_step(session, task, "error", {"message": exc.message, "phase": exc.phase})
-            await AgentTaskService.finish(session, task, "failed", error=f"{exc.phase}: {exc.message}")
-    except asyncio.TimeoutError:
-        async with session_factory() as session:
-            task = await session.get(AgentTask, task_id)
-            await AgentTaskService.record_step(session, task, "error", {"message": "final phases exceeded the grace period", "phase": "report"})
-            await AgentTaskService.finish(session, task, "failed", error="report: final phases exceeded the grace period")
+            if task is None:
+                return
+            if task.status in ("queued", "running"):
+                await AgentTaskService.record_step(session, task, "error", {"message": exc.message, "phase": exc.phase})
+                await AgentTaskService.finish(session, task, "failed", error=f"{exc.phase}: {exc.message}")
     except Exception as exc:  # noqa: BLE001 - the worker must never die on one task
         log.exception("agent_task_crashed", task_id=str(task_id))
         async with session_factory() as session:
             task = await session.get(AgentTask, task_id)
-            if task and task.status == "running":
+            if task is None:
+                return
+            if task.status in ("queued", "running"):
                 await AgentTaskService.record_step(session, task, "error", {"message": str(exc), "phase": "loop"})
                 await AgentTaskService.finish(session, task, "failed", error=f"loop: {exc}")
