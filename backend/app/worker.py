@@ -18,6 +18,9 @@ log = structlog.get_logger()
 
 POLL_SECONDS = 5
 SWEEP_SECONDS = 60
+# Used only when the task row cannot be read back right after the claim; the
+# same value as the agent model's own default.
+FALLBACK_TASK_TIMEOUT_SECONDS = 300
 
 
 class Worker:
@@ -51,9 +54,27 @@ class Worker:
         return started
 
     async def _run_with_heartbeat(self, task_id):
+        loop = asyncio.get_running_loop()
+        # Past the task's own hard budget the heartbeat stops: a run wedged in a
+        # call that never returns would otherwise look alive to the stale sweep
+        # forever, and nothing else can reclaim it.
+        timeout_seconds = FALLBACK_TASK_TIMEOUT_SECONDS
+        try:
+            async with self.sf() as session:
+                task = await session.get(AgentTask, task_id)
+            if task is not None:
+                timeout_seconds = task.timeout_seconds
+        except Exception as exc:
+            log.warning("agent_task_budget_unknown", task_id=str(task_id), error=str(exc))
+        hard_stop = loop.time() + timeout_seconds + settings.AGENT_TASK_FINAL_GRACE_SECONDS + settings.LLM_CALL_TIMEOUT_SECONDS
+
         async def beat():
             while True:
                 await asyncio.sleep(settings.AGENT_TASK_HEARTBEAT_SECONDS)
+                if loop.time() > hard_stop:
+                    log.warning("agent_task_heartbeat_budget_exhausted", task_id=str(task_id),
+                                timeout_seconds=timeout_seconds)
+                    return
                 try:
                     async with self.sf() as session:
                         await AgentTaskService.heartbeat(session, task_id)

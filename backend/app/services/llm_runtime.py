@@ -1,10 +1,12 @@
 """LLM and MCP primitives shared by the chat and the agent runner."""
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
 
 import structlog
 
+from app.config import settings
 from app.models import McpServer
 from app.services.mcp_service import McpService, _build_http_transport
 
@@ -16,6 +18,23 @@ MAX_TOOL_RESULT_LEN = 2000
 # function-calling provider.  In particular, Gemini rejects validation and
 # metadata keywords such as `$schema`, `minimum`, and `additionalProperties`.
 _FUNCTION_SCHEMA_FIELDS = {"type", "description", "properties", "required", "items", "enum"}
+
+# Google has no roles: the conversation is flattened into one text prompt whose
+# turns are delimited by [System] / [User] / [Assistant] / [Tool result ...]
+# markers. Any text that reaches the prompt from outside (a user message or an
+# MCP tool result) could forge one of those markers and pass itself off as a
+# system instruction, so every interpolated fragment gets its markers quoted.
+_FRAME_MARKER = re.compile(r"\[(System|User|Assistant|Tool result[^\]]*)\]", re.IGNORECASE)
+
+GOOGLE_STANDING_INSTRUCTION = (
+    "If you already have tool results above that answer the user's question, "
+    "use them directly. Do NOT call the same tool again."
+)
+
+
+def _quote_markers(text: str) -> str:
+    """Defuse forged frame markers in untrusted text before it joins the prompt."""
+    return _FRAME_MARKER.sub(lambda m: "[" + m.group(1) + " (quoted)]", text or "")
 
 
 @dataclass
@@ -95,11 +114,16 @@ async def call_mcp_tool(tool_name: str, args: dict, server: McpServer) -> str:
         else:
             return json.dumps({"error": f"Server {server.name} not configured properly"})
         async with Client(transport) as client:
-            result = await client.call_tool(tool_name, args)
+            result = await asyncio.wait_for(client.call_tool(tool_name, args),
+                                            timeout=settings.MCP_TOOL_TIMEOUT_SECONDS)
         text = result[0].text if result else ""
         if len(text) > MAX_TOOL_RESULT_LEN:
             text = text[:MAX_TOOL_RESULT_LEN] + f"\n[truncated, {len(text)} chars total]"
         return text
+    except asyncio.TimeoutError:
+        # Reported like any other tool failure so the loop keeps its shape.
+        log.error("MCP tool call timed out", tool=tool_name, timeout=settings.MCP_TOOL_TIMEOUT_SECONDS)
+        return json.dumps({"error": f"tool timed out after {settings.MCP_TOOL_TIMEOUT_SECONDS}s"})
     except Exception as e:
         log.error("MCP tool call failed", tool=tool_name, error=str(e))
         return json.dumps({"error": str(e)})
@@ -113,7 +137,7 @@ async def call_llm(provider: str, model: str, api_key: str, messages: list[dict]
 def _call_llm_sync(provider, model, api_key, messages, tools) -> LlmResult:
     if provider == "openai":
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, timeout=settings.LLM_CALL_TIMEOUT_SECONDS)
         kwargs = {"model": model, "messages": messages, "stream": True,
                   "stream_options": {"include_usage": True}}
         if tools:
@@ -145,7 +169,7 @@ def _call_llm_sync(provider, model, api_key, messages, tools) -> LlmResult:
 
     if provider == "anthropic":
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=settings.LLM_CALL_TIMEOUT_SECONDS)
         anthropic_tools = [{"name": t["function"]["name"], "description": t["function"]["description"],
                             "input_schema": t["function"]["parameters"]} for t in (tools or [])]
         system_text, msgs = "", []
@@ -188,26 +212,35 @@ def _call_llm_sync(provider, model, api_key, messages, tools) -> LlmResult:
             google_tools = [genai.types.Tool(function_declarations=decls)]
         model_obj = genai.GenerativeModel(model, tools=google_tools)
         parts = []
+        system_seen = False
         for m in messages:
             if m["role"] == "system":
-                parts.append(f"[System] {m['content']}")
+                # The standing instruction rides with the real system text at the
+                # top of the prompt, where no later turn can appear to override it.
+                content = m["content"]
+                if not system_seen:
+                    content = f"{content}\n\n{GOOGLE_STANDING_INSTRUCTION}"
+                    system_seen = True
+                parts.append(f"[System] {content}")
             elif m["role"] == "user":
-                parts.append(f"[User] {m['content']}")
+                parts.append(f"[User] {_quote_markers(m['content'])}")
             elif m["role"] == "assistant":
                 if m.get("tool_calls"):
                     for tc in m["tool_calls"]:
                         parts.append(f"[Assistant called tool: {tc.get('function', tc).get('name', 'unknown')}]")
                 elif m.get("content"):
-                    parts.append(f"[Assistant] {m['content']}")
+                    parts.append(f"[Assistant] {_quote_markers(m['content'])}")
             elif m["role"] == "tool":
-                content = m["content"]
+                content = _quote_markers(m["content"])
                 if len(content) > MAX_TOOL_RESULT_LEN:
                     content = content[:MAX_TOOL_RESULT_LEN] + f"\n[truncated, {len(m['content'])} chars total]"
                 parts.append(f"[Tool result for {m.get('tool_call_id', '').replace('call_', '')}]\n{content}")
+        if not system_seen:
+            parts.insert(0, f"[System] {GOOGLE_STANDING_INSTRUCTION}")
         prompt = "\n\n".join(parts)
-        prompt += "\n\n[System] If you already have tool results above that answer the user's question, use them directly. Do NOT call the same tool again."
         text, calls, tokens_in, tokens_out = "", [], 0, 0
-        for chunk in model_obj.generate_content(prompt, stream=True):
+        for chunk in model_obj.generate_content(
+                prompt, stream=True, request_options={"timeout": settings.LLM_CALL_TIMEOUT_SECONDS}):
             try:
                 if chunk.text:
                     text += chunk.text

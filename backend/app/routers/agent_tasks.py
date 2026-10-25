@@ -5,10 +5,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import selectinload
+from sqlalchemy.pool import NullPool
 
-from app.database import async_session, engine, get_async_session
+from app.config import settings
+from app.database import async_session, get_async_session
 from app.models import AgentTask, AgentTaskStep
 from app.models.agent_task import FINAL_STATUSES
 from app.schemas import AgentTaskDetail, AgentTaskRead, AgentTaskStepDetail, AgentTaskStepRead
@@ -59,7 +61,11 @@ KEEPALIVE_SECONDS = 20
 
 # Module-level so tests can point the stream at the test database.
 session_factory = async_session
-db_engine = engine
+# A LISTEN connection is held for the whole life of the stream, so it must not
+# come out of the request pool: a handful of open streams would otherwise
+# starve every other request. NullPool opens one connection per stream and
+# closes it on disconnect.
+db_engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
 
 
 def _status_payload(task: AgentTask) -> dict:
@@ -134,7 +140,10 @@ async def _event_stream(task_id: uuid.UUID):
 
 
 @router.get("/{task_id}/events")
-async def task_events(task_id: uuid.UUID, session: AsyncSession = Depends(get_async_session)):
-    await _get_task(session, task_id)
+async def task_events(task_id: uuid.UUID):
+    # Existence check on its own short-lived session: no pooled connection may
+    # outlive the request setup, the stream only uses db_engine afterwards.
+    async with session_factory() as session:
+        await _get_task(session, task_id)
     return StreamingResponse(_event_stream(task_id), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

@@ -79,15 +79,23 @@ class AgentService:
         out = {aid: {"running_task_id": None, "last_task": None} for aid in agent_ids}
         if not agent_ids:
             return out
-        rows = (await session.execute(
-            select(AgentTask).where(AgentTask.agent_id.in_(agent_ids)).order_by(AgentTask.agent_id, AgentTask.created_at.desc())
-        )).scalars().all()
-        for task in rows:
-            entry = out[task.agent_id]
-            if entry["last_task"] is None:
-                entry["last_task"] = {"id": task.id, "status": task.status, "outcome": task.outcome, "finished_at": task.finished_at}
-            if task.status == "running" and entry["running_task_id"] is None:
-                entry["running_task_id"] = task.id
+        # Two narrow queries instead of loading every task entity of every
+        # agent: DISTINCT ON (agent_id) gives the newest task per agent in one
+        # pass, and the open-task index answers the running lookup.
+        last_rows = (await session.execute(
+            select(AgentTask.agent_id, AgentTask.id, AgentTask.status, AgentTask.outcome, AgentTask.finished_at)
+            .distinct(AgentTask.agent_id)
+            .where(AgentTask.agent_id.in_(agent_ids))
+            .order_by(AgentTask.agent_id, AgentTask.created_at.desc())
+        )).all()
+        for agent_id, task_id, status, outcome, finished_at in last_rows:
+            out[agent_id]["last_task"] = {"id": task_id, "status": status, "outcome": outcome, "finished_at": finished_at}
+        running_rows = (await session.execute(
+            select(AgentTask.agent_id, AgentTask.id)
+            .where(AgentTask.agent_id.in_(agent_ids), AgentTask.status == "running")
+        )).all()
+        for agent_id, task_id in running_rows:
+            out[agent_id]["running_task_id"] = task_id
         return out
 
     @staticmethod

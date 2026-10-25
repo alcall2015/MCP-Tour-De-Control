@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from structlog.testing import capture_logs
 
 from app.config import settings
 from app.models import Agent, AgentTask, McpServer
@@ -115,4 +116,39 @@ async def test_run_crash_is_logged_and_slot_freed(setup_db, session):
     await asyncio.sleep(0.1)
 
     assert worker._free_slots() == worker.concurrency
+    await worker.close()
+
+
+async def test_heartbeat_stops_after_hard_budget(setup_db, session, monkeypatch):
+    """Past timeout + grace + one LLM call the beater gives up, so the sweep can reclaim."""
+    agent = await _agent(session, "wedged")
+    task = await AgentTaskService.enqueue(session, agent, objective=None, trigger="manual")
+    async with async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)() as s:
+        t = await s.get(AgentTask, task.id)
+        t.timeout_seconds = 0
+        await s.commit()
+
+    monkeypatch.setattr(settings, "AGENT_TASK_HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "AGENT_TASK_FINAL_GRACE_SECONDS", 0)
+    monkeypatch.setattr(settings, "LLM_CALL_TIMEOUT_SECONDS", 0)
+    # With a zero budget everywhere it is already spent when the beater starts,
+    # so the very first tick must stop it.
+
+    calls: list = []
+
+    async def counting_heartbeat(session, task_id):
+        calls.append(task_id)
+
+    monkeypatch.setattr(AgentTaskService, "heartbeat", counting_heartbeat)
+    factory = async_sessionmaker(setup_db, class_=AsyncSession, expire_on_commit=False)
+
+    async def slow_run(task_id, **_):
+        await asyncio.sleep(0.2)
+
+    worker = Worker(concurrency=1, run=slow_run, session_factory=factory, worker_id="w-test")
+    with capture_logs() as logs:
+        await worker._run_with_heartbeat(task.id)
+
+    assert calls == []                                   # never heartbeats past the budget
+    assert any(e["event"] == "agent_task_heartbeat_budget_exhausted" for e in logs)
     await worker.close()

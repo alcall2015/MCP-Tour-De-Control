@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     AGENT_TASK_HEARTBEAT_SECONDS: int = 15
     AGENT_TASK_STALE_SECONDS: int = 90
     AGENT_TASK_FINAL_GRACE_SECONDS: int = 90
+    # Per-call ceilings: without them a provider or an MCP server that never
+    # answers hangs a task until the stale sweep notices, which it cannot do
+    # while the heartbeat keeps beating.
+    LLM_CALL_TIMEOUT_SECONDS: int = 120
+    MCP_TOOL_TIMEOUT_SECONDS: int = 120
 
     model_config = {"env_file": ".env"}
 
