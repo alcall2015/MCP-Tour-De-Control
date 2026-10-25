@@ -104,6 +104,7 @@ async def update_agent(agent_id: uuid.UUID, data: AgentUpdate, session: AsyncSes
 
     await session.commit()
     await session.refresh(agent)
+    log.info("agent_updated", agent_id=str(agent.id), fields=[f for f in data.model_fields_set])
     return _to_read(agent)
 
 

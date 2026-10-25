@@ -8,8 +8,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.config import Base
 from app.models.mcp_server import McpServer
 
-AGENT_STATUSES = ("draft", "active", "paused", "archived")
-
 agent_mcp_server = Table(
     "agent_mcp_server",
     Base.metadata,

@@ -169,6 +169,17 @@ async def test_update_without_server_ids_keeps_servers(setup_test_db):
     assert resp.json()["description"] == "note"
 
 
+async def test_update_only_servers_moves_updated_at(setup_test_db):
+    """A server-set-only PUT touches no column on `agent`, so updated_at must be bumped explicitly."""
+    s1 = await create_server(setup_test_db, "one")
+    async with client() as c:
+        data = await create_agent(c)
+        resp = await c.put(f"/api/v1/agents/{data['id']}", json={"mcp_server_ids": [s1]})
+    assert resp.status_code == 200
+    assert [s["id"] for s in resp.json()["mcp_servers"]] == [s1]
+    assert resp.json()["updated_at"] > data["updated_at"]
+
+
 async def test_update_unknown_server_404_and_not_found():
     async with client() as c:
         data = await create_agent(c)
