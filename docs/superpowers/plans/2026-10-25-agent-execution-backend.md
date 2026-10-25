@@ -952,6 +952,8 @@ Expected: FAIL at import (`No module named 'app.services.agent_task_service'`).
 
 - [ ] **Step 3: Create the service**
 
+> Superseded: the committed `backend/app/services/agent_task_service.py` is the reference after the review hardening (partial unique index, agent-row lock, locked `record_step`, id-based sweep, conditional `finish`). The sample below is the pre-review version kept for history.
+
 ```python
 """Every write to agent_task / agent_task_step goes through here.
 

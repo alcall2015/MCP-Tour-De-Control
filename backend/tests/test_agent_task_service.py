@@ -1,5 +1,6 @@
 import asyncio
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
@@ -39,6 +40,27 @@ async def test_enqueue_rejects_inactive_agent_and_duplicates(session):
     await AgentTaskService.enqueue(session, active, objective="first", trigger="manual")
     with pytest.raises(TaskConflict):
         await AgentTaskService.enqueue(session, active, objective="second", trigger="cron")
+
+
+async def test_enqueue_reraises_unrelated_integrity_errors(session):
+    """Only the partial unique index means "already has an open task"; any other
+    IntegrityError (here: a foreign key to an agent row that doesn't exist) must
+    propagate unchanged, and the savepoint rollback must leave the session usable."""
+    ghost = Agent(id=uuid.uuid4(), name="ghost", objective="o", status="active")
+    with pytest.raises(IntegrityError):
+        await AgentTaskService.enqueue(session, ghost, objective=None, trigger="manual")
+    assert (await session.execute(select(AgentTask))).scalars().all() == []
+
+
+async def test_enqueue_conflict_keeps_session_usable(session):
+    agent = await make_agent(session)
+    await AgentTaskService.enqueue(session, agent, objective="first", trigger="manual")
+    with pytest.raises(TaskConflict):
+        await AgentTaskService.enqueue(session, agent, objective="second", trigger="cron")
+    # The conflict rolls back only the nested savepoint, not the whole session.
+    assert agent.name == "a"
+    rows = (await session.execute(select(AgentTask).where(AgentTask.agent_id == agent.id))).scalars().all()
+    assert len(rows) == 1
 
 
 async def test_second_open_task_per_agent_is_rejected_by_the_database(session):
@@ -175,6 +197,49 @@ async def test_sweep_handles_null_heartbeat_and_skips_locked(setup_db, session):
     await session.refresh(locked)
     assert null_hb.status == "failed" and null_hb.error == "worker lost"
     assert locked.status == "running"
+
+
+async def test_sweep_survives_a_failing_candidate(session, monkeypatch):
+    """A failure on one candidate (e.g. a transient error inside record_step) must not
+    expire the ORM objects of the other candidates and abort the whole sweep: it must
+    roll back just that candidate's work and keep going."""
+    agent1 = await make_agent(session, "a1")
+    agent2 = await make_agent(session, "a2")
+    old = datetime.now(timezone.utc) - timedelta(minutes=10)
+    task1 = AgentTask(agent_id=agent1.id, trigger="manual", objective="1", instructions="",
+                      max_steps=5, timeout_seconds=60, status="running", worker_id="dead1",
+                      started_at=old, heartbeat_at=old)
+    task2 = AgentTask(agent_id=agent2.id, trigger="manual", objective="2", instructions="",
+                      max_steps=5, timeout_seconds=60, status="running", worker_id="dead2",
+                      started_at=old, heartbeat_at=old)
+    session.add_all([task1, task2])
+    await session.commit()
+    task1_id, task2_id = task1.id, task2.id
+
+    original_record_step = AgentTaskService.record_step
+    calls = {"n": 0}
+
+    async def flaky_record_step(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        return await original_record_step(*args, **kwargs)
+
+    monkeypatch.setattr(AgentTaskService, "record_step", flaky_record_step)
+
+    count = await AgentTaskService.sweep_stale(session, older_than_seconds=90)
+    assert count == 1
+
+    # The DB query has no ORDER BY, so which of the two stale rows is handed to the
+    # first (failing) record_step call is unspecified; what must hold regardless is
+    # that exactly one survives untouched (still running) and the other was carried
+    # through to failed once record_step started working again.
+    task1 = await session.get(AgentTask, task1_id)
+    task2 = await session.get(AgentTask, task2_id)
+    statuses = {task1.status, task2.status}
+    assert statuses == {"running", "failed"}
+    failed_task = task1 if task1.status == "failed" else task2
+    assert failed_task.error == "worker lost"
 
 
 async def test_record_step_increments_seq_and_totals(session):

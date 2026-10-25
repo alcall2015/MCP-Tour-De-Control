@@ -7,7 +7,7 @@ one open task per agent is the partial unique index
 Postgres NOTIFY so the API can stream it."""
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import structlog
 from sqlalchemy import and_, func, or_, select, text, update
@@ -29,10 +29,6 @@ class TaskConflict(Exception):
     def __init__(self, detail: str):
         super().__init__(detail)
         self.detail = detail
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 async def _notify(session: AsyncSession, channel: str, payload: str) -> None:
@@ -60,15 +56,20 @@ class AgentTaskService:
             objective=(objective or "").strip() or agent.objective,
             instructions=agent.instructions, max_steps=agent.max_steps, timeout_seconds=agent.timeout_seconds,
         )
-        session.add(task)
         # The pre-check above is a friendly 409 for the common case; the partial
         # unique index (uq_agent_task_open_per_agent) is what actually prevents
-        # a cron tick racing a manual Run from inserting two open tasks.
+        # a cron tick racing a manual Run from inserting two open tasks. Scoped
+        # to a savepoint so a conflict only rolls back this insert, not the
+        # caller's whole session.
         try:
-            await session.flush()
-        except IntegrityError:
-            await session.rollback()
-            raise TaskConflict("Agent already has a queued or running task")
+            async with session.begin_nested():
+                session.add(task)
+                await session.flush()
+        except IntegrityError as exc:
+            name = getattr(getattr(exc, "orig", None), "constraint_name", None) or ""
+            if name == "uq_agent_task_open_per_agent" or "uq_agent_task_open_per_agent" in str(exc):
+                raise TaskConflict("Agent already has a queued or running task")
+            raise
         await _notify(session, QUEUED_CHANNEL, str(task.id))
         await session.commit()
         await session.refresh(task)
@@ -110,8 +111,8 @@ class AgentTaskService:
     @staticmethod
     async def sweep_stale(session: AsyncSession, older_than_seconds: int) -> int:
         cutoff = func.now() - timedelta(seconds=older_than_seconds)
-        stale = (await session.execute(
-            select(AgentTask).where(
+        stale_ids = (await session.execute(
+            select(AgentTask.id).where(
                 AgentTask.status == "running",
                 or_(
                     AgentTask.heartbeat_at < cutoff,
@@ -120,14 +121,20 @@ class AgentTaskService:
             ).with_for_update(skip_locked=True)
         )).scalars().all()
         count = 0
-        for task in stale:
+        for tid in stale_ids:
             try:
+                task = await session.get(AgentTask, tid)
+                if task is None or task.status != "running":
+                    # Already handled (e.g. a previous iteration's failure was
+                    # rolled back after this one was swept) or gone outright.
+                    continue
                 await AgentTaskService.record_step(session, task, "error", {"message": "worker lost", "phase": "claim"})
-                await AgentTaskService.finish(session, task, "failed", error="worker lost")
-                log.warning("agent_task_worker_lost", task_id=str(task.id), worker_id=task.worker_id)
-                count += 1
+                finished = await AgentTaskService.finish(session, task, "failed", error="worker lost")
+                if finished:
+                    log.warning("agent_task_worker_lost", task_id=str(task.id), worker_id=task.worker_id)
+                    count += 1
             except Exception:
-                log.exception("agent_task_sweep_failed", task_id=str(task.id))
+                log.exception("agent_task_sweep_failed", task_id=str(tid))
                 await session.rollback()
         return count
 
@@ -157,7 +164,8 @@ class AgentTaskService:
 
     @staticmethod
     async def finish(session, task, status, *, outcome=None, error=None) -> bool:
-        assert status in FINAL_STATUSES, status
+        if status not in FINAL_STATUSES:
+            raise ValueError(f"not a final status: {status}")
         result = await session.execute(
             update(AgentTask)
             .where(AgentTask.id == task.id, AgentTask.status.in_(("queued", "running")))
