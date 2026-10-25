@@ -29,6 +29,11 @@ class ConfigRead(BaseModel):
     sms_autoreply_lookback_minutes: int
     sms_autoreply_recipient_cooldown_hours: int
     pairing_archive_retention_days: int
+    pairing_call_enabled: bool
+    pairing_call_interval_minutes: int
+    pairing_call_min_seconds: int
+    pairing_call_max_seconds: int
+    pairing_call_max_per_run: int
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -57,3 +62,8 @@ class ConfigUpdate(BaseModel):
     sms_autoreply_lookback_minutes: int | None = None
     sms_autoreply_recipient_cooldown_hours: int | None = None
     pairing_archive_retention_days: int | None = None
+    pairing_call_enabled: bool | None = None
+    pairing_call_interval_minutes: int | None = None
+    pairing_call_min_seconds: int | None = None
+    pairing_call_max_seconds: int | None = None
+    pairing_call_max_per_run: int | None = None

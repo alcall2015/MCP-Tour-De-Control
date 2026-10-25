@@ -86,6 +86,19 @@ class SimPairMessageQueue(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class SimPairCall(Base):
+    """One internal test call originated between an active SIM pair."""
+    __tablename__ = "sim_pair_call"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pair_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    from_sim_id: Mapped[int] = mapped_column(Integer)
+    to_sim_id: Mapped[int] = mapped_column(Integer)
+    hold_seconds: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="started")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class SimPairingRun(Base):
     __tablename__ = "sim_pairing_run"
 

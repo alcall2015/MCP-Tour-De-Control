@@ -87,6 +87,7 @@ async def lifespan(app: FastAPI):
     scheduler_service.set_pairing_job()
     scheduler_service.set_pair_conversation_job()
     scheduler_service.set_sms_auto_reply_job()
+    scheduler_service.set_pair_call_job()
 
     yield
 

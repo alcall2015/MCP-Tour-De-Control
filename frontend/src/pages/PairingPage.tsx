@@ -1,9 +1,15 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createSimPairingGroup, createSimPairingTopic, deleteSimPairingGroup, deleteSimPairingTopic, getConfig, getSimPairQueueStats, getSimPairsCount, listSimPairHistory, listSimPairingGroups, listSimPairingTopics, listSimPairMessageQueue, listSimPairMessages, listSimPairs, previewSimPairConversation, runSimPairConversations, syncSimPairs, updateConfig } from "../lib/api";
+import { createSimPairingGroup, createSimPairingTopic, deleteSimPairingGroup, deleteSimPairingTopic, getConfig, getSimPairQueueStats, getSimPairsCount, listSimPairHistory, listSimPairingGroups, listSimPairingTopics, listSimPairMessageQueue, listSimPairMessages, listSimPairs, previewSimPairConversation, runSimPairCalls, runSimPairConversations, syncSimPairs, updateConfig } from "../lib/api";
 import { Spinner } from "../components/ui/Spinner";
 
 const PAIRS_PAGE_SIZE = 25;
+
+const NEW_SIM_AUTOMATION_NOTICE = (
+  <div className="rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: "rgba(251, 191, 36, 0.35)", backgroundColor: "rgba(251, 191, 36, 0.08)", color: "var(--warning)" }}>
+    <strong>New-SIM risk notice.</strong> A call or SMS between two newly activated SIMs in the same 60-minute window is statistically implausible in legitimate use (estimated below 0.1%). Colleagues usually call family, resellers use test numbers, and call centers use established lines; a household may test several SIMs, but rarely in the same hour. Keep this disabled unless the activity is documented and authorised.
+  </div>
+);
 
 export function PairingPage() {
   const queryClient = useQueryClient();
@@ -23,6 +29,7 @@ export function PairingPage() {
   const [quietEnabled, setQuietEnabled] = useState<boolean | null>(null);
   const [quietStart, setQuietStart] = useState<number | null>(null);
   const [quietEnd, setQuietEnd] = useState<number | null>(null);
+  const [callEnabled, setCallEnabled] = useState<boolean | null>(null);
   const { data: groups = [], isLoading } = useQuery({
     queryKey: ["sim-pairing-groups"],
     queryFn: listSimPairingGroups,
@@ -71,6 +78,7 @@ export function PairingPage() {
     },
   });
   const previewMut = useMutation({ mutationFn: previewSimPairConversation });
+  const callMut = useMutation({ mutationFn: runSimPairCalls });
   const conversationConfigMut = useMutation({
     mutationFn: updateConfig,
     onSuccess: () => { setOpenRouterKey(""); setOpenRouterModel(null); setConversationInterval(null); setConversationEnabled(null); setTargetMessages(null); setMaxPerRun(null); setSimCooldown(null); setQuietEnabled(null); setQuietStart(null); setQuietEnd(null); queryClient.invalidateQueries({ queryKey: ["config"] }); },
@@ -112,6 +120,14 @@ export function PairingPage() {
             Configure SIM sources separately from the conversation subjects assigned to pairs.
           </p>
         </div>
+      </div>
+
+      <div className="card p-6">
+        <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>Pair Calls</h3>
+        <p className="mt-1 text-sm" style={{ color: "var(--text-secondary)" }}>Internal A → B / B → A calls hold for a random 45–75 seconds. Both SIMs must be IDLE, not in a call, not resting, and past their cooldown.</p>
+        <div className="mt-4 flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 text-sm" style={{ color: "var(--text-primary)" }}><input type="checkbox" checked={callEnabled ?? config?.pairing_call_enabled ?? false} onChange={(event) => setCallEnabled(event.target.checked)} /> Enable pair calls</label><button type="button" className="btn-secondary" onClick={() => conversationConfigMut.mutate({ pairing_call_enabled: callEnabled ?? config?.pairing_call_enabled ?? false })}>Save</button><button type="button" className="btn-primary" disabled={!(callEnabled ?? config?.pairing_call_enabled) || callMut.isPending} onClick={() => callMut.mutate()}>{callMut.isPending ? "Calling..." : "Run due calls now"}</button></div>
+        <div className="mt-3 max-w-3xl">{NEW_SIM_AUTOMATION_NOTICE}</div>
+        {callMut.data && <p className="mt-3 text-sm" style={{ color: "var(--success)" }}>{callMut.data.reason ?? `${callMut.data.started} calls started; ${callMut.data.skipped} skipped; ${callMut.data.failed} failed.`}</p>}
       </div>
 
       <div className="card p-6">
@@ -202,7 +218,7 @@ export function PairingPage() {
             </div>
           </div>
         )}
-        {historyPairId && <div className="mt-5 rounded-lg p-4" style={{ backgroundColor: "var(--bg-panel)" }}><div className="flex justify-between"><span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Pair history</span><button onClick={() => setHistoryPairId(null)} className="text-xs" style={{ color: "var(--text-secondary)" }}>Close</button></div>{history.map((event) => <p key={event.id} className="mt-2 text-xs" style={{ color: "var(--text-secondary)" }}>{new Date(event.created_at).toLocaleString()} — {event.event}</p>)}</div>}
+        {historyPairId && <div className="mt-5 rounded-lg p-4" style={{ backgroundColor: "var(--bg-panel)" }}><div className="flex justify-between"><span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Pair history</span><button onClick={() => setHistoryPairId(null)} className="text-xs" style={{ color: "var(--text-secondary)" }}>Close</button></div>{history.map((event) => <p key={event.id} className="mt-2 text-xs" style={{ color: event.event === "archived" ? "var(--warning)" : "var(--text-secondary)" }}>{new Date(event.created_at).toLocaleString()} — {event.event}{typeof event.details?.reason === "string" ? `: ${event.details.reason}` : ""}</p>)}</div>}
         {messagesPairId && <div className="mt-5 rounded-lg p-4" style={{ backgroundColor: "var(--bg-panel)" }}><div className="flex justify-between"><span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>SMS conversation</span><button onClick={() => setMessagesPairId(null)} className="text-xs" style={{ color: "var(--text-secondary)" }}>Close</button></div>{messages.length === 0 ? <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>No messages yet.</p> : messages.map((message) => <div key={message.id} className="mt-3 rounded-lg p-3 text-sm" style={{ backgroundColor: "var(--bg-card)" }}><p style={{ color: "var(--text-primary)" }}>{message.content || "Message generation failed"}</p><p className="mt-1 text-xs" style={{ color: message.status === "sent" ? "var(--success)" : "var(--error)" }}>SIM {message.from_sim_id} → SIM {message.to_sim_id} · {message.status} · {new Date(message.created_at).toLocaleString()}</p>{message.error && <p className="mt-1 text-xs" style={{ color: "var(--error)" }}>{message.error}</p>}</div>)}</div>}
       </div>
 
@@ -224,7 +240,10 @@ export function PairingPage() {
             </div>
             <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>One window for the whole fleet, in UTC — the SIMs span several countries and no local time is applied. Messages due inside the window are moved to just after it and spread over 90 minutes. Two equal hours mean no quiet time.</p>
           </div>
-          <label className="flex items-center gap-3 text-sm" style={{ color: "var(--text-primary)" }}><input type="checkbox" checked={activeConversationEnabled} onChange={(event) => setConversationEnabled(event.target.checked)} /> Enable automatic SMS continuation</label>
+          <div>
+            <label className="flex items-center gap-3 text-sm" style={{ color: "var(--text-primary)" }}><input type="checkbox" checked={activeConversationEnabled} onChange={(event) => setConversationEnabled(event.target.checked)} /> Enable automatic SMS continuation</label>
+            <div className="mt-3">{NEW_SIM_AUTOMATION_NOTICE}</div>
+          </div>
           <div className="flex flex-wrap gap-3"><button type="button" className="btn-secondary" onClick={() => conversationConfigMut.mutate({ pairing_openrouter_api_key: openRouterKey || undefined, pairing_openrouter_model: openRouterModel ?? config?.pairing_openrouter_model, pairing_conversation_interval_minutes: activeInterval, pairing_target_messages: targetMessages ?? config?.pairing_target_messages, pairing_max_messages_per_run: activeMaxPerRun, pairing_sim_cooldown_minutes: simCooldown ?? config?.pairing_sim_cooldown_minutes, pairing_quiet_hours_enabled: activeQuietEnabled, pairing_quiet_start_hour: activeQuietStart, pairing_quiet_end_hour: activeQuietEnd, pairing_conversation_enabled: activeConversationEnabled })} disabled={conversationConfigMut.isPending}>{conversationConfigMut.isPending ? "Saving..." : "Save conversation settings"}</button><button type="button" className="btn-secondary" onClick={() => previewMut.mutate()} disabled={!activeConversationEnabled || previewMut.isPending}>{previewMut.isPending ? "Generating preview..." : "Preview one SMS (no send)"}</button><button type="button" className="btn-primary" onClick={() => conversationMut.mutate()} disabled={!activeConversationEnabled || conversationMut.isPending}>{conversationMut.isPending ? "Continuing..." : "Continue due pairs now"}</button></div>
           {previewMut.data?.previews?.map((preview) => <div key={preview.pair_id} className="rounded-lg p-3 text-sm" style={{ color: "var(--text-primary)", backgroundColor: "var(--bg-panel)" }}><p className="text-xs" style={{ color: "var(--text-secondary)" }}>Preview — SIM {preview.from_sim_id} → SIM {preview.to_sim_id}; not sent</p><p className="mt-1">{preview.content}</p></div>)}
           {conversationMut.data && <p className="text-sm" style={{ color: "var(--success)" }}>{conversationMut.data.reason ?? `${conversationMut.data.sent} SMS sent; ${conversationMut.data.held ?? 0} held for pacing; ${conversationMut.data.skipped} deferred (SIM unavailable); ${conversationMut.data.failed} failed.`}</p>}

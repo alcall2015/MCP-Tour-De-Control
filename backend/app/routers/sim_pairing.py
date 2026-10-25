@@ -11,6 +11,7 @@ from app.models import SimPair, SimPairHistory, SimPairMessage, SimPairMessageQu
 from app.schemas.sim_pairing import SimPairCountRead, SimPairHistoryRead, SimPairMessageQueueRead, SimPairMessageRead, SimPairQueueStats, SimPairRead, SimPairingGroupCreate, SimPairingGroupRead, SimPairingTopicCreate, SimPairingTopicRead
 from app.services.sim_pair_conversation_service import SimPairConversationService
 from app.services.sim_pairing_service import SimPairingService
+from app.services.sim_pair_call_service import SimPairCallService
 
 router = APIRouter(prefix="/api/v1/sim-pairing", tags=["sim-pairing"])
 
@@ -141,3 +142,8 @@ async def run_pair_conversations(country: str | None = None, session: AsyncSessi
 async def preview_pair_conversation(session: AsyncSession = Depends(get_async_session)):
     """Generate one proposed SMS without persisting it or calling TmLite."""
     return await SimPairConversationService.run_due(session, dry_run=True, limit=1)
+
+
+@router.post("/calls/run")
+async def run_pair_calls(session: AsyncSession = Depends(get_async_session)):
+    return await SimPairCallService.run_due(session)

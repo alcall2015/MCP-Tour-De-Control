@@ -52,3 +52,8 @@ class Config(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
+    pairing_call_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    pairing_call_interval_minutes: Mapped[int] = mapped_column(Integer, default=360)
+    pairing_call_min_seconds: Mapped[int] = mapped_column(Integer, default=45)
+    pairing_call_max_seconds: Mapped[int] = mapped_column(Integer, default=75)
+    pairing_call_max_per_run: Mapped[int] = mapped_column(Integer, default=5)

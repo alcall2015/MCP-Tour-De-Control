@@ -9,6 +9,7 @@ from app.models import Config
 from app.schemas import ConfigRead, ConfigUpdate
 from app.services.google_service import parse_file_id
 from app.services.scheduler_service import is_valid_cron, scheduler_service
+from app.services.sms_auto_reply_rules import template_variants
 from app.utils.crypto import decrypt_value, encrypt_value
 
 router = APIRouter(prefix="/api/v1/config", tags=["config"])
@@ -68,6 +69,11 @@ def _to_read(config: Config) -> ConfigRead:
         sms_autoreply_lookback_minutes=config.sms_autoreply_lookback_minutes,
         sms_autoreply_recipient_cooldown_hours=config.sms_autoreply_recipient_cooldown_hours,
         pairing_archive_retention_days=config.pairing_archive_retention_days,
+        pairing_call_enabled=config.pairing_call_enabled,
+        pairing_call_interval_minutes=config.pairing_call_interval_minutes,
+        pairing_call_min_seconds=config.pairing_call_min_seconds,
+        pairing_call_max_seconds=config.pairing_call_max_seconds,
+        pairing_call_max_per_run=config.pairing_call_max_per_run,
         updated_at=config.updated_at,
     )
 
@@ -149,8 +155,11 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
         config.sms_autoreply_enabled = data.sms_autoreply_enabled
     if data.sms_autoreply_template is not None:
         template = data.sms_autoreply_template.strip()
-        if "{whatsapp}" not in template:
-            raise HTTPException(status_code=422, detail="sms_autoreply_template must contain {whatsapp}")
+        if not template or any("{whatsapp}" not in variant for variant in template_variants(template)):
+            raise HTTPException(
+                status_code=422,
+                detail="each sms_autoreply_template alternative must contain {whatsapp}",
+            )
         config.sms_autoreply_template = template
     if data.sms_autoreply_max_per_run is not None:
         if not 1 <= data.sms_autoreply_max_per_run <= 50:
@@ -199,6 +208,27 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
             raise HTTPException(status_code=422,
                                 detail="pairing_archive_retention_days must be between 0 and 3650")
         config.pairing_archive_retention_days = data.pairing_archive_retention_days
+
+    if data.pairing_call_enabled is not None:
+        config.pairing_call_enabled = data.pairing_call_enabled
+    if data.pairing_call_interval_minutes is not None:
+        if not 60 <= data.pairing_call_interval_minutes <= 1440:
+            raise HTTPException(status_code=422, detail="pairing_call_interval_minutes must be between 60 and 1440")
+        config.pairing_call_interval_minutes = data.pairing_call_interval_minutes
+    for field in ("pairing_call_min_seconds", "pairing_call_max_seconds"):
+        seconds = getattr(data, field)
+        if seconds is not None and not 5 <= seconds <= 600:
+            raise HTTPException(status_code=422, detail=f"{field} must be between 5 and 600")
+        if seconds is not None:
+            setattr(config, field, seconds)
+    min_seconds = data.pairing_call_min_seconds if data.pairing_call_min_seconds is not None else config.pairing_call_min_seconds
+    max_seconds = data.pairing_call_max_seconds if data.pairing_call_max_seconds is not None else config.pairing_call_max_seconds
+    if min_seconds > max_seconds:
+        raise HTTPException(status_code=422, detail="pairing_call_min_seconds must not exceed pairing_call_max_seconds")
+    if data.pairing_call_max_per_run is not None:
+        if not 1 <= data.pairing_call_max_per_run <= 20:
+            raise HTTPException(status_code=422, detail="pairing_call_max_per_run must be between 1 and 20")
+        config.pairing_call_max_per_run = data.pairing_call_max_per_run
 
     await session.commit()
     await session.refresh(config)

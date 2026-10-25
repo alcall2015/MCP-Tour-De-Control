@@ -94,6 +94,16 @@ async def _execute_sms_auto_reply():
     except Exception as exc:
         log.error("SMS auto-reply run failed", error=str(exc))
 
+async def _execute_sim_pair_calls():
+    from app.database import async_session
+    from app.services.sim_pair_call_service import SimPairCallService
+    try:
+        async with async_session() as session:
+            summary = await SimPairCallService.run_due(session)
+        log.info("SIM pair call run completed", **summary)
+    except Exception as exc:
+        log.error("SIM pair call run failed", error=str(exc))
+
 
 class SchedulerService:
     def __init__(self, use_db_jobstore: bool = True):
@@ -166,6 +176,7 @@ class SchedulerService:
     PAIRING_JOB_ID = "sim_pairing_sync"
     PAIR_CONVERSATION_JOB_ID = "sim_pair_conversation"
     SMS_AUTO_REPLY_JOB_ID = "sms_auto_reply"
+    PAIR_CALL_JOB_ID = "sim_pair_calls"
 
     # All three of these talk to the same external TmLite service and the same
     # SIMs. Anchoring them at the same instant means three simultaneous
@@ -180,6 +191,7 @@ class SchedulerService:
         PAIRING_JOB_ID: 1,
         PAIR_CONVERSATION_JOB_ID: 6,
         SMS_AUTO_REPLY_JOB_ID: 11,
+        PAIR_CALL_JOB_ID: 13,
     }
 
     def _interval_trigger(self, job_id: str) -> IntervalTrigger:
@@ -222,6 +234,9 @@ class SchedulerService:
             id=self.SMS_AUTO_REPLY_JOB_ID,
             replace_existing=True,
         )
+
+    def set_pair_call_job(self):
+        self.scheduler.add_job(_execute_sim_pair_calls, trigger=self._interval_trigger(self.PAIR_CALL_JOB_ID), id=self.PAIR_CALL_JOB_ID, replace_existing=True)
 
 
 def is_valid_cron(cron_expr: str) -> bool:

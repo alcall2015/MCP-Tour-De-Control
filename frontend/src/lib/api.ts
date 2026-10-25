@@ -55,6 +55,7 @@ export const getSimPairQueueStats = () => request<SimPairQueueStats>("/sim-pairi
 export const syncSimPairs = () => request<SimPairingRun>("/sim-pairing/sync", { method: "POST" });
 export const runSimPairConversations = () => request<SimPairConversationRun>("/sim-pairing/conversations/run", { method: "POST" });
 export const previewSimPairConversation = () => request<SimPairConversationRun>("/sim-pairing/conversations/preview", { method: "POST" });
+export const runSimPairCalls = () => request<SimPairCallRun>("/sim-pairing/calls/run", { method: "POST" });
 
 // SMS auto-reply
 export const listSmsReplies = () => request<SmsReply[]>("/sms-autoreply/replies");
@@ -150,6 +151,11 @@ export interface Config {
   sms_autoreply_max_per_run: number;
   sms_autoreply_lookback_minutes: number;
   sms_autoreply_recipient_cooldown_hours: number;
+  pairing_call_enabled: boolean;
+  pairing_call_interval_minutes: number;
+  pairing_call_min_seconds: number;
+  pairing_call_max_seconds: number;
+  pairing_call_max_per_run: number;
 }
 export interface ConfigUpdate {
   llm_provider?: string;
@@ -173,6 +179,11 @@ export interface ConfigUpdate {
   sms_autoreply_max_per_run?: number;
   sms_autoreply_lookback_minutes?: number;
   sms_autoreply_recipient_cooldown_hours?: number;
+  pairing_call_enabled?: boolean;
+  pairing_call_interval_minutes?: number;
+  pairing_call_min_seconds?: number;
+  pairing_call_max_seconds?: number;
+  pairing_call_max_per_run?: number;
 }
 export interface McpServer {
   id: string;
@@ -230,6 +241,7 @@ export interface SmsAutoReplyStats { sent: number; failed: number; skipped: numb
 export interface SmsAutoReplyPreview { kind: string; to_number: string; whatsapp: string | null; content: string | null; skip_reason: string | null; }
 export interface SmsAutoReplyRun { sent: number; skipped: number; failed: number; reason?: string; previews?: SmsAutoReplyPreview[]; }
 export interface Prompt {
+export interface SimPairCallRun { started: number; skipped: number; failed: number; reason?: string; }
   id: string;
   name: string;
   description: string | null;
