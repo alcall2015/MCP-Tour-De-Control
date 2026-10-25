@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FINAL_TASK_STATUSES, getAgentTask, streamAgentTask } from "../../lib/api";
 import type { AgentTaskDetail, AgentTaskStep } from "../../lib/api";
@@ -17,23 +17,21 @@ export function useAgentTaskStream(taskId: string) {
   const [liveMeta, setLiveMeta] = useState<{ outcome: AgentTaskDetail["outcome"]; error: string | null; finished_at: string | null } | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [live, setLive] = useState(false);
-  const started = useRef(false);
 
   const initialStatus = query.data?.status;
   const shouldStream = Boolean(initialStatus) && !FINAL_TASK_STATUSES.has(initialStatus as string);
 
   // The page stays mounted when the route switches to another task: reset the live state per task id.
   useEffect(() => {
-    started.current = false;
     setLiveSteps([]);
     setLiveStatus(null);
     setLiveMeta(null);
     setStreamError(null);
   }, [taskId]);
 
+  // No "started" guard: StrictMode runs setup/cleanup/setup on mount and the cleanup aborts the first stream, so the second setup must be allowed to open the real one.
   useEffect(() => {
-    if (!shouldStream || started.current) return;
-    started.current = true;
+    if (!shouldStream) return;
     const controller = new AbortController();
     setLive(true);
     streamAgentTask(taskId, (e) => {
