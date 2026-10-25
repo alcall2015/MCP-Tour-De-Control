@@ -1,4 +1,5 @@
 import type { AgentPlan } from "../../lib/api";
+import { text } from "./text";
 
 export function TaskPlan({ plan }: { plan: AgentPlan | null }) {
   return (
@@ -9,28 +10,31 @@ export function TaskPlan({ plan }: { plan: AgentPlan | null }) {
       ) : (
         <>
           <ol className="space-y-1.5 text-sm" style={{ color: "var(--text-secondary)" }}>
-            {plan.steps.map((s, i) => (
-              <li key={i} className="flex gap-2">
-                <span className="font-mono" style={{ color: "var(--text-muted)" }}>{i + 1}.</span>
-                <span>
-                  {s.title}
-                  {s.tools.length > 0 && <span className="ml-2 font-mono text-xs" style={{ color: "var(--accent)" }}>{s.tools.join(", ")}</span>}
-                </span>
-              </li>
-            ))}
+            {(plan.steps ?? []).map((s, i) => {
+              const tools = s.tools ?? [];
+              return (
+                <li key={i} className="flex gap-2">
+                  <span className="font-mono" style={{ color: "var(--text-muted)" }}>{i + 1}.</span>
+                  <span>
+                    {s.title}
+                    {tools.length > 0 && <span className="ml-2 font-mono text-xs" style={{ color: "var(--accent)" }}>{tools.map(text).join(", ")}</span>}
+                  </span>
+                </li>
+              );
+            })}
           </ol>
           <div>
             <p className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Success criteria</p>
             <ul className="space-y-1 text-sm" style={{ color: "var(--text-secondary)" }}>
-              {plan.success_criteria.map((c) => (
-                <li key={c.id} className="flex gap-2"><span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{c.id}</span><span>{c.description}</span></li>
+              {(plan.success_criteria ?? []).map((c, i) => (
+                <li key={c?.id ?? i} className="flex gap-2"><span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{c?.id}</span><span>{text(c?.description)}</span></li>
               ))}
             </ul>
           </div>
-          {plan.risks.length > 0 && (
+          {Array.isArray(plan.risks) && plan.risks.length > 0 && (
             <div>
               <p className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Risks</p>
-              <ul className="list-disc pl-5 text-sm" style={{ color: "var(--text-secondary)" }}>{plan.risks.map((r, i) => <li key={i}>{r}</li>)}</ul>
+              <ul className="list-disc pl-5 text-sm" style={{ color: "var(--text-secondary)" }}>{plan.risks.map((r, i) => <li key={i}>{text(r)}</li>)}</ul>
             </div>
           )}
         </>

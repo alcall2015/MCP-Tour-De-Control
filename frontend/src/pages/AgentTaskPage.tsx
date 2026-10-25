@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { FINAL_TASK_STATUSES, cancelAgentTask, listAgents } from "../lib/api";
 import { Spinner } from "../components/ui/Spinner";
 import { MutationError } from "../components/ui/MutationError";
+import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 import { useAgentTaskStream } from "../components/Agents/useAgentTaskStream";
 import { OutcomeBadge, TaskStatusBadge } from "../components/Agents/AgentTaskBadges";
 import { formatDuration } from "../components/Agents/time";
@@ -76,11 +77,11 @@ export function AgentTaskPage() {
       </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <TaskPlan plan={task.plan} />
-        <TaskCritique critique={task.critique} plan={task.plan} />
+        <ErrorBoundary><TaskPlan plan={task.plan} /></ErrorBoundary>
+        <ErrorBoundary><TaskCritique critique={task.critique} plan={task.plan} /></ErrorBoundary>
       </div>
-      <TaskReport report={task.report} />
-      <TaskTimeline taskId={taskId} steps={steps} />
+      <ErrorBoundary><TaskReport report={task.report} /></ErrorBoundary>
+      <ErrorBoundary><TaskTimeline taskId={taskId} steps={steps} /></ErrorBoundary>
     </div>
   );
 }

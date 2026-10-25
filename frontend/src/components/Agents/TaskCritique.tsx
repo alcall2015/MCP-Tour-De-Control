@@ -1,7 +1,13 @@
 import type { AgentCritique, AgentPlan } from "../../lib/api";
+import { text } from "./text";
 
 export function TaskCritique({ critique, plan }: { critique: AgentCritique | null; plan: AgentPlan | null }) {
-  const describe = (id: string) => plan?.success_criteria.find((c) => c.id === id)?.description ?? "";
+  const criteria = critique && Array.isArray(critique.criteria) ? critique.criteria : [];
+  const describe = (id: string) => {
+    const list = plan && Array.isArray(plan.success_criteria) ? plan.success_criteria : [];
+    const match = list.find((c) => c?.id === id);
+    return match ? text(match.description) : "";
+  };
   return (
     <section className="card p-4 space-y-3">
       <div className="flex items-center gap-3">
@@ -21,21 +27,23 @@ export function TaskCritique({ critique, plan }: { critique: AgentCritique | nul
             </tr>
           </thead>
           <tbody>
-            {critique.criteria.map((c) => {
-              const counts = c.met && c.confidence >= 0.5;
+            {criteria.map((c, i) => {
+              // The model can return anything here: coerce the confidence rather than trusting it is a number.
+              const confidence = Number(c?.confidence) || 0;
+              const counts = Boolean(c?.met) && confidence >= 0.5;
               return (
-                <tr key={c.id} className="align-top" style={{ borderTop: "1px solid var(--border)" }}>
-                  <td className="py-2 pr-3"><span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{c.id}</span> <span style={{ color: "var(--text-secondary)" }}>{describe(c.id)}</span></td>
-                  <td className="py-2 pr-3" style={{ color: counts ? "var(--success)" : "var(--error)" }}>{c.met ? "yes" : "no"}</td>
+                <tr key={c?.id ?? i} className="align-top" style={{ borderTop: "1px solid var(--border)" }}>
+                  <td className="py-2 pr-3"><span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{c?.id}</span> <span style={{ color: "var(--text-secondary)" }}>{describe(c?.id)}</span></td>
+                  <td className="py-2 pr-3" style={{ color: counts ? "var(--success)" : "var(--error)" }}>{c?.met ? "yes" : "no"}</td>
                   <td className="py-2 pr-3">
                     <div className="flex items-center gap-2">
                       <div className="h-1.5 w-24 rounded-full overflow-hidden" style={{ backgroundColor: "var(--bg-elevated)" }}>
-                        <div className="h-full" style={{ width: `${Math.round(c.confidence * 100)}%`, backgroundColor: counts ? "var(--success)" : "var(--warning)" }} />
+                        <div className="h-full" style={{ width: `${Math.round(confidence * 100)}%`, backgroundColor: counts ? "var(--success)" : "var(--warning)" }} />
                       </div>
-                      <span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{c.confidence.toFixed(2)}</span>
+                      <span className="font-mono text-xs" style={{ color: "var(--text-muted)" }}>{confidence.toFixed(2)}</span>
                     </div>
                   </td>
-                  <td className="py-2" style={{ color: "var(--text-secondary)" }}>{c.justification}</td>
+                  <td className="py-2" style={{ color: "var(--text-secondary)" }}>{text(c?.justification)}</td>
                 </tr>
               );
             })}

@@ -326,21 +326,23 @@ export interface AgentTaskSummary {
   outcome: AgentOutcome | null;
   finished_at: string | null;
 }
+/** Model-produced JSON: the backend only checks that `steps` and `success_criteria` are non-empty lists with unique ids and that `risks` exists, so every field is rendered defensively. */
 export interface AgentPlan {
-  steps: { title: string; tools: string[] }[];
+  steps: { title: string; tools?: string[] }[];
   success_criteria: { id: string; description: string }[];
-  risks: string[];
+  risks?: unknown;
 }
 export interface AgentCritique {
   criteria: { id: string; met: boolean; confidence: number; justification: string }[];
   limit_hit: "max_steps" | "timeout" | null;
 }
+/** Model-produced JSON: the backend only checks that `summary` is a non-empty string and the four collections are lists, so their items are rendered defensively. */
 export interface AgentReport {
   summary: string;
   actions: { step_seq: number; description: string }[];
-  evidence: string[];
-  uncertainties: string[];
-  next_steps: string[];
+  evidence: unknown[];
+  uncertainties: unknown[];
+  next_steps: unknown[];
 }
 export interface AgentTask {
   id: string;
@@ -543,6 +545,8 @@ export function parseSSE(
 ): Promise<void> {
   const decoder = new TextDecoder();
   let buffer = "";
+  // Hoisted out of `process`: an `event:` line can be the last complete line of a chunk while its `data:` line arrives in the next one.
+  let currentEvent = "";
 
   return reader.read().then(function process({ done, value }): Promise<void> {
     if (done) return Promise.resolve();
@@ -551,7 +555,6 @@ export function parseSSE(
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
 
-    let currentEvent = "";
     for (const line of lines) {
       if (line.startsWith("event: ")) {
         currentEvent = line.slice(7).trim();

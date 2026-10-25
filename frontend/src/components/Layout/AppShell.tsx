@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { TabNav } from "./TabNav";
+import { ErrorBoundary } from "../ui/ErrorBoundary";
 
 export function AppShell() {
   const { pathname } = useLocation();
@@ -21,7 +22,8 @@ export function AppShell() {
       <TabNav />
       <main className="app-main">
         <div className="page-context"><div><span>Control center</span><h2>{page[0]}</h2><p>{page[1]}</p></div><div className="page-context-status"><i/> All systems operational</div></div>
-        <Outlet />
+        {/* Keyed on the path so navigating away from a broken page clears the caught error. */}
+        <ErrorBoundary key={pathname}><Outlet /></ErrorBoundary>
       </main>
     </div>
   );
