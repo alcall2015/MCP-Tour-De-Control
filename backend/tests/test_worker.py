@@ -160,6 +160,7 @@ async def test_heartbeat_stops_after_hard_budget(setup_db, session, monkeypatch)
     monkeypatch.setattr(settings, "AGENT_TASK_HEARTBEAT_SECONDS", 0.01)
     monkeypatch.setattr(settings, "AGENT_TASK_FINAL_GRACE_SECONDS", 0)
     monkeypatch.setattr(settings, "LLM_CALL_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(settings, "MCP_TOOL_TIMEOUT_SECONDS", 0)
     # With a zero budget everywhere it is already spent when the beater starts,
     # so the very first tick must stop it.
 

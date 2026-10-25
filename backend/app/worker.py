@@ -65,9 +65,14 @@ class Worker:
                 task = await session.get(AgentTask, task_id)
             if task is not None:
                 timeout_seconds = task.timeout_seconds
+            else:
+                log.warning("agent_task_budget_unknown", task_id=str(task_id), error="task row not found")
         except Exception as exc:
             log.warning("agent_task_budget_unknown", task_id=str(task_id), error=str(exc))
-        hard_stop = loop.time() + timeout_seconds + settings.AGENT_TASK_FINAL_GRACE_SECONDS + settings.LLM_CALL_TIMEOUT_SECONDS
+        # The loop only checks its deadline between rounds, so the last round can
+        # overrun by one LLM call plus its tool calls before the final phases run.
+        hard_stop = (loop.time() + timeout_seconds + settings.AGENT_TASK_FINAL_GRACE_SECONDS
+                     + settings.LLM_CALL_TIMEOUT_SECONDS + 2 * settings.MCP_TOOL_TIMEOUT_SECONDS)
 
         async def beat():
             while True:
