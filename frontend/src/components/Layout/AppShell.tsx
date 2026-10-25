@@ -3,7 +3,7 @@ import { TabNav } from "./TabNav";
 
 export function AppShell() {
   const { pathname } = useLocation();
-  const page = {
+  const PAGES: Record<string, [string, string]> = {
     "/": ["Automations", "Create, schedule and supervise MCP workflows."],
     "/agents": ["Agents", "Define autonomous agents, their MCP servers and limits."],
     "/reports": ["Reports", "Review the results of every execution."],
@@ -13,7 +13,9 @@ export function AppShell() {
     "/stress-call": ["Stress Call", "Measure SIP capacity and call quality."],
     "/chat": ["Assistant", "Ask, test tools and turn ideas into workflows."],
     "/config": ["Settings", "Configure the control plane and its integrations."],
-  }[pathname] ?? ["Tour de Control", "Operations workspace."];
+  };
+  const key = pathname === "/" ? "/" : Object.keys(PAGES).find((k) => k !== "/" && (pathname === k || pathname.startsWith(k + "/")));
+  const page = (key && PAGES[key]) ?? ["Tour de Control", "Operations workspace."];
   return (
     <div className="app-frame" style={{ backgroundColor: "var(--bg-void)", color: "var(--text-primary)" }}>
       <TabNav />
