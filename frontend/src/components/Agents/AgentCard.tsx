@@ -5,7 +5,8 @@ import { listAgentTasks } from "../../lib/api";
 import type { Agent, AgentStatus } from "../../lib/api";
 import { MutationError } from "../ui/MutationError";
 import { AgentTaskRow } from "./AgentTaskRow";
-import { OutcomeBadge, TaskStatusBadge, relativeTime } from "./AgentTaskBadges";
+import { OutcomeBadge, TaskStatusBadge } from "./AgentTaskBadges";
+import { relativeTime } from "./time";
 
 interface Props {
   agent: Agent;

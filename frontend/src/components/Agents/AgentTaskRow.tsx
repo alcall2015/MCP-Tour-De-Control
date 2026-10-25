@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { AgentTask } from "../../lib/api";
-import { OutcomeBadge, TaskStatusBadge, relativeTime } from "./AgentTaskBadges";
+import { OutcomeBadge, TaskStatusBadge } from "./AgentTaskBadges";
+import { relativeTime } from "./time";
 
 export function AgentTaskRow({ agentId, task }: { agentId: string; task: AgentTask }) {
   return (
