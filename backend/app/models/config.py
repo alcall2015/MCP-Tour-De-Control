@@ -54,11 +54,11 @@ class Config(Base):
     # 0 keeps archived pairs forever. Deleting one removes its messages,
     # history and queue rows too — there is no foreign key to cascade.
     pairing_archive_retention_days: Mapped[int] = mapped_column(Integer, default=90)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
-    )
     pairing_call_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     pairing_call_interval_minutes: Mapped[int] = mapped_column(Integer, default=360)
     pairing_call_min_seconds: Mapped[int] = mapped_column(Integer, default=45)
     pairing_call_max_seconds: Mapped[int] = mapped_column(Integer, default=75)
     pairing_call_max_per_run: Mapped[int] = mapped_column(Integer, default=5)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )

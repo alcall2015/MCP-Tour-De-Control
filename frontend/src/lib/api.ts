@@ -151,16 +151,16 @@ export interface Config {
   pairing_quiet_hours_enabled: boolean;
   pairing_quiet_start_hour: number;
   pairing_quiet_end_hour: number;
-  sms_autoreply_enabled: boolean;
-  sms_autoreply_template: string;
-  sms_autoreply_max_per_run: number;
-  sms_autoreply_lookback_minutes: number;
-  sms_autoreply_recipient_cooldown_hours: number;
   pairing_call_enabled: boolean;
   pairing_call_interval_minutes: number;
   pairing_call_min_seconds: number;
   pairing_call_max_seconds: number;
   pairing_call_max_per_run: number;
+  sms_autoreply_enabled: boolean;
+  sms_autoreply_template: string;
+  sms_autoreply_max_per_run: number;
+  sms_autoreply_lookback_minutes: number;
+  sms_autoreply_recipient_cooldown_hours: number;
 }
 export interface ConfigUpdate {
   llm_provider?: string;
@@ -179,16 +179,16 @@ export interface ConfigUpdate {
   pairing_quiet_hours_enabled?: boolean;
   pairing_quiet_start_hour?: number;
   pairing_quiet_end_hour?: number;
-  sms_autoreply_enabled?: boolean;
-  sms_autoreply_template?: string;
-  sms_autoreply_max_per_run?: number;
-  sms_autoreply_lookback_minutes?: number;
-  sms_autoreply_recipient_cooldown_hours?: number;
   pairing_call_enabled?: boolean;
   pairing_call_interval_minutes?: number;
   pairing_call_min_seconds?: number;
   pairing_call_max_seconds?: number;
   pairing_call_max_per_run?: number;
+  sms_autoreply_enabled?: boolean;
+  sms_autoreply_template?: string;
+  sms_autoreply_max_per_run?: number;
+  sms_autoreply_lookback_minutes?: number;
+  sms_autoreply_recipient_cooldown_hours?: number;
 }
 export interface McpServer {
   id: string;
@@ -241,13 +241,13 @@ export interface SimPairMessageQueue { id: string; pair_id: string; status: stri
 export interface SimPairQueueStats { pending: number; overdue: number; failed: number; pairs_under_target: number; }
 export interface SimPairCount { active: number; archived: number; }
 export interface SimPairConversationRun { sent: number; skipped: number; failed: number; held?: number; active_pairs?: number; queued?: number; overdue?: number; pairs_under_target?: number; reason?: string; previews?: { pair_id: string; from_sim_id: number; to_sim_id: number; content: string }[]; }
+export interface SimPairCallRun { started: number; skipped: number; failed: number; reason?: string; }
 export interface SmsReply { id: string; trigger_kind: string; trigger_ref: string; sim_id: number; to_number: string; whatsapp_number: string | null; content: string; status: string; error: string | null; sent_at: string | null; created_at: string; }
-export interface SmsAutoReplyStats { sent: number; failed: number; skipped: number; sending: number; last_sent_at: string | null; }
 export interface SmsReplyPage { items: SmsReply[]; total: number; }
+export interface SmsAutoReplyStats { sent: number; failed: number; skipped: number; sending: number; last_sent_at: string | null; }
 export interface SmsAutoReplyPreview { kind: string; to_number: string; whatsapp: string | null; content: string | null; skip_reason: string | null; }
 export interface SmsAutoReplyRun { sent: number; skipped: number; failed: number; reason?: string; previews?: SmsAutoReplyPreview[]; }
 export interface Prompt {
-export interface SimPairCallRun { started: number; skipped: number; failed: number; reason?: string; }
   id: string;
   name: string;
   description: string | null;
