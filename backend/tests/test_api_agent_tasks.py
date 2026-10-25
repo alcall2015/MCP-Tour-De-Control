@@ -6,6 +6,7 @@ os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from unittest.mock import patch
 
 from app.main import app
 from app.database import get_async_session
@@ -21,6 +22,7 @@ async def setup_test_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    factory.engine = engine
 
     async def override():
         async with factory() as session:
@@ -105,3 +107,72 @@ async def test_cancel_queued_running_and_final(setup_test_db):
             assert str(claimed.id) == task2["id"]
         resp = await c.post(f"/api/v1/agent-tasks/{task2['id']}/cancel")
         assert resp.status_code == 202 and resp.json()["status"] == "running" and resp.json()["cancel_requested"] is True
+
+
+# ---- SSE -------------------------------------------------------------------
+
+import asyncio
+import json
+
+
+def _parse_sse(text: str) -> list[tuple[str, dict]]:
+    events = []
+    for block in text.strip().split("\n\n"):
+        lines = [l for l in block.split("\n") if l and not l.startswith(":")]
+        if not lines:
+            continue
+        name = next(l[len("event: "):] for l in lines if l.startswith("event: "))
+        data = next(l[len("data: "):] for l in lines if l.startswith("data: "))
+        events.append((name, json.loads(data)))
+    return events
+
+
+async def test_events_backlog_then_done_for_a_final_task(setup_test_db):
+    aid = await make_agent(setup_test_db)
+    async with setup_test_db() as s:
+        agent = await s.get(Agent, uuid.UUID(aid))
+        task = await AgentTaskService.enqueue(s, agent, objective=None, trigger="manual")
+        await AgentTaskService.record_step(s, task, "plan", {"steps": []}, prompt=[{"role": "system", "content": "p"}])
+        await AgentTaskService.finish(s, task, "completed", outcome="success")
+    with patch("app.routers.agent_tasks.session_factory", setup_test_db), \
+         patch("app.routers.agent_tasks.db_engine", setup_test_db.engine):
+        async with client() as c:
+            resp = await c.get(f"/api/v1/agent-tasks/{task.id}/events")
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse(resp.text)
+    assert [e for e, _ in events] == ["step", "status", "done"]
+    assert events[0][1]["kind"] == "plan" and "prompt" not in events[0][1]
+    assert events[1][1]["status"] == "completed" and events[1][1]["outcome"] == "success"
+
+
+async def test_events_stream_live_steps_until_final(setup_test_db):
+    aid = await make_agent(setup_test_db)
+    async with setup_test_db() as s:
+        agent = await s.get(Agent, uuid.UUID(aid))
+        task = await AgentTaskService.enqueue(s, agent, objective=None, trigger="manual")
+        task = await AgentTaskService.claim(s, "w")
+
+    async def produce():
+        await asyncio.sleep(0.3)
+        async with setup_test_db() as s:
+            t = await s.get(AgentTask, task.id)
+            await AgentTaskService.record_step(s, t, "turn", {"text": "hi", "tool_calls": []})
+            await AgentTaskService.record_step(s, t, "report", {"summary": "ok"})
+            await AgentTaskService.finish(s, t, "completed", outcome="partial")
+
+    producer = asyncio.create_task(produce())
+    with patch("app.routers.agent_tasks.session_factory", setup_test_db), \
+         patch("app.routers.agent_tasks.db_engine", setup_test_db.engine):
+        async with client() as c:
+            async with c.stream("GET", f"/api/v1/agent-tasks/{task.id}/events") as resp:
+                body = ""
+                async for chunk in resp.aiter_text():
+                    body += chunk
+                    if "event: done" in body:
+                        break
+    await producer
+    events = _parse_sse(body)
+    names = [e for e, _ in events]
+    assert names[0] == "status" and names[-1] == "done"
+    assert [d["kind"] for e, d in events if e == "step"] == ["turn", "report"]
+    assert any(e == "status" and d["status"] == "completed" for e, d in events)
