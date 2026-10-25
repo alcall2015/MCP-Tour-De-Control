@@ -91,7 +91,7 @@ export function TabNav() {
               style={{ backgroundColor: "var(--accent)" }}
             />
             <h1
-              className="font-display text-base font-600 tracking-tight"
+              className="font-display text-base font-600 tracking-tight min-w-28 leading-tight"
               style={{ color: "var(--text-primary)", fontFamily: "'Space Grotesk', system-ui, sans-serif", fontWeight: 600 }}
             >
               MCP Tour De Control
@@ -106,7 +106,7 @@ export function TabNav() {
                 to={tab.to}
                 end={tab.to === "/"}
                 className={({ isActive }) =>
-                  `flex items-center gap-1.5 whitespace-nowrap px-2.5 py-3.5 text-sm font-medium transition-all duration-200 relative ${
+                  `flex items-center gap-1.5 whitespace-nowrap px-2 py-3.5 text-sm font-medium transition-all duration-200 relative ${
                     isActive ? "text-white" : "hover:text-white"
                   }`
                 }
@@ -124,7 +124,7 @@ export function TabNav() {
               href={`https://${window.location.hostname}:8443`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 whitespace-nowrap px-2.5 py-3.5 text-sm font-medium transition-all duration-200 hover:text-white"
+              className="flex items-center gap-1.5 whitespace-nowrap px-2 py-3.5 text-sm font-medium transition-all duration-200 hover:text-white"
               style={{
                 color: "var(--text-secondary)",
                 borderBottom: "2px solid transparent",
