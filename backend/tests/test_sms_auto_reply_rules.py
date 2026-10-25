@@ -90,6 +90,12 @@ def test_a_call_from_an_unknown_gateway_slot_yields_no_sim():
     assert missed_call_trigger(calls, FLEET, INDEX)["sim_id"] is None
 
 
+def test_a_cdr_sim_id_wins_over_the_current_gateway_slot_mapping():
+    call = _call("33600000001", "0700001111", "2026-08-28T10:00:00")
+    call["sim_id"] = 987
+    assert missed_call_trigger([call], FLEET, INDEX)["sim_id"] == 987
+
+
 def test_a_recipient_messaged_recently_is_dropped():
     triggers = [{"ref": "call:1", "kind": "missed_call", "sim_id": 872,
                  "to_number": "+2250700002222", "whatsapp": "33600000002"}]
@@ -100,6 +106,14 @@ def test_a_recipient_messaged_recently_is_dropped():
 
 def test_the_template_is_rendered_verbatim():
     assert render("Ecris-moi au {whatsapp}.", "33600000002") == "Ecris-moi au 33600000002."
+
+
+def test_render_selects_one_of_the_configured_alternatives():
+    template = "Salut {whatsapp}.\n---\nBonjour {whatsapp}."
+    assert render(template, "33600000002") in {
+        "Salut 33600000002.",
+        "Bonjour 33600000002.",
+    }
 
 
 def test_is_messageable_destination_rejects_carrier_traffic():

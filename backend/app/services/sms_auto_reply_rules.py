@@ -1,5 +1,17 @@
 """Who gets an automatic reply, and what it says. No I/O lives here."""
+import random
 import re
+
+
+# A separator that is readable in the configuration textarea and cannot occur
+# accidentally in normal SMS prose.  Each alternative must retain {whatsapp}.
+TEMPLATE_SEPARATOR = "\n---\n"
+
+
+def template_variants(template: str) -> list[str]:
+    """Split a configured reply into its eligible random alternatives."""
+    variants = [value.strip() for value in template.split(TEMPLATE_SEPARATOR) if value.strip()]
+    return variants or [template.strip()]
 
 # Every attempt that did not become a conversation. The three differ in how the
 # leg ended, not in whether the person was reached. COMPLETED with a duration is
@@ -102,8 +114,11 @@ def missed_call_trigger(calls: list[dict], fleet: set[str],
     return {
         "ref": latest["ref"],
         "kind": "missed_call",
-        # The CDR has no SIM id; only (gateway, slot) can resolve it.
-        "sim_id": index.get((latest.get("gateway"), latest.get("slot"))),
+        # Current TmLite CDRs carry the authoritative SIM id.  Only legacy
+        # rows without it fall back to the current gateway/slot inventory.
+        # This prevents a slot replacement between the call and this job from
+        # making a different SIM send the reply.
+        "sim_id": latest.get("sim_id") or index.get((latest.get("gateway"), latest.get("slot"))),
         "to_number": latest["callee"],
         "whatsapp": latest.get("caller"),
     }
@@ -135,4 +150,4 @@ def drop_recent_recipients(triggers: list[dict], recent: set[str]) -> list[dict]
 
 
 def render(template: str, whatsapp: str) -> str:
-    return template.replace("{whatsapp}", whatsapp)
+    return random.choice(template_variants(template)).replace("{whatsapp}", whatsapp)

@@ -19,10 +19,16 @@ def test_every_fixture_call_normalizes():
     assert all(r["caller"] and r["callee"] and r["status"] for r in rows)
 
 
-def test_a_call_carries_gateway_and_slot_because_it_has_no_sim_id():
+def test_a_legacy_call_carries_gateway_and_slot_without_a_sim_id():
     row = normalize_call(FIXTURES["list_calls"][0])
-    assert "sim_id" not in row
+    assert row["sim_id"] is None
     assert row["gateway"] and isinstance(row["slot"], int)
+
+
+def test_a_current_cdr_preserves_its_authoritative_sim_id():
+    row = dict(FIXTURES["list_calls"][0], sim_card_id=987)
+    normalized = normalize_call(row)
+    assert normalized["sim_id"] == 987
 
 
 def test_the_sim_index_resolves_a_call_to_a_sim():

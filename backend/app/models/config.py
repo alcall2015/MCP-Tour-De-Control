@@ -38,7 +38,12 @@ class Config(Base):
     sms_autoreply_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     sms_autoreply_template: Mapped[str] = mapped_column(
         Text,
-        default="Salut, j'essaye de te joindre. Ecris-moi sur WhatsApp au {whatsapp}.",
+        default=(
+            "Salut, j'essaie de te joindre. Ecris-moi sur WhatsApp au {whatsapp}.\n---\n"
+            "Bonjour, je n'ai pas pu te joindre. Ecris-moi sur WhatsApp au {whatsapp}.\n---\n"
+            "Salut, rappelle-moi ou ecris-moi sur WhatsApp au {whatsapp}.\n---\n"
+            "Bonjour, contacte-moi sur WhatsApp au {whatsapp}."
+        ),
     )
     sms_autoreply_max_per_run: Mapped[int] = mapped_column(Integer, default=10)
     sms_autoreply_lookback_minutes: Mapped[int] = mapped_column(Integer, default=60)

@@ -116,14 +116,16 @@ def _missed(caller, callee, at, status="MISSED", duration=0, gateway="CIV-RED-3"
             "duration": duration, "gateway_name": gateway, "sim_card_slot": slot, "started_at": at}
 
 
-async def test_a_reply_goes_out_from_the_receiving_sim(session):
+async def test_a_reply_goes_out_from_the_receiving_sim(session, monkeypatch):
+    # The reply template now holds several random variants; pin the first one.
+    monkeypatch.setattr("app.services.sms_auto_reply_rules.random.choice", lambda variants: variants[0])
     await _configure(session)
     with _tmlite(sms=[_sms("1", 872, "0700003331")],
                  calls=[_call("33600000002", "0700003331")]) as sent:
         result = await SmsAutoReplyService.run(session)
     assert result["sent"] == 1
     assert sent[0][1] == {"from_sim_id": 872, "to_number": "0700003331",
-                          "text": "Salut, j'essaye de te joindre. Ecris-moi sur WhatsApp au 33600000002."}
+                          "text": "Salut, j'essaie de te joindre. Ecris-moi sur WhatsApp au 33600000002."}
 
 
 async def test_the_same_trigger_is_never_answered_twice(session):

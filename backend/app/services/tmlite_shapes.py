@@ -32,18 +32,25 @@ def normalize_sms(raw: dict) -> dict | None:
 
 
 def normalize_call(raw: dict) -> dict | None:
-    """A CDR row carries no SIM id — only gateway and slot. Resolving the SIM
-    is `sim_index`'s job, so this shape deliberately has no `sim_id` key."""
+    """Normalize a CDR, preserving its authoritative SIM id when supplied.
+
+    Older TmLite CDRs exposed only the gateway and physical slot, so callers
+    still receive those fields for a compatibility fallback.  New CDRs expose
+    ``sim_card_id`` and that value must win: it identifies the SIM that
+    actually handled the call, even if a slot is later reassigned.
+    """
     ref = _first(raw, "uuid", "id")
     caller, callee = _first(raw, "caller"), _first(raw, "callee")
     if ref is None or caller is None or callee is None:
         return None
     slot = _first(raw, "sim_card_slot", "slot")
+    sim_id = _first(raw, "sim_card_id", "sim_id")
     duration = raw.get("duration")
     return {
         "ref": f"call:{ref}",
         "gateway": str(_first(raw, "gateway_name") or ""),
         "slot": int(slot) if slot is not None else None,
+        "sim_id": int(sim_id) if sim_id is not None else None,
         "caller": str(caller),
         "callee": str(callee),
         "status": str(raw.get("status") or ""),
