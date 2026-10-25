@@ -39,7 +39,8 @@ class _FleetMcpClient:
 
     async def call_tool(self, name, args):
         if name == "list_gateways":
-            return [_Content([{"id": 1, "country": "CI", "name": "CIV-RED-1"}])]
+            gateway_ids = sorted({sim.get("gateway_id") for sim in self._sims if sim.get("gateway_id") is not None})
+            return [_Content([{"id": gateway_id, "country": "CI", "name": f"CIV-RED-{gateway_id}"} for gateway_id in gateway_ids])]
         if name == "list_sims":
             return [_Content(self._sims if args["skip"] == 0 else [])]
         raise AssertionError(f"unexpected tool call: {name}")
@@ -52,11 +53,11 @@ async def _seed_pairing_config(session):
     await session.commit()
 
 
-def _sim(sim_id, state, group="love", gateway_id=1):
+def _sim(sim_id, state, group="love", gateway_id=None):
     return {
         "id": sim_id,
         "state": state,
-        "gateway_id": gateway_id,
+        "gateway_id": sim_id if gateway_id is None else gateway_id,
         "sim_group_name": group,
         "phone_number": f"07{sim_id:08d}",
     }
@@ -214,6 +215,7 @@ async def test_a_blocked_sim_has_its_pairs_archived_and_gets_no_new_pair(session
     assert run.summary["archived"] == 1
     refreshed = (await session.execute(select(SimPair).where(SimPair.id == pair.id))).scalar_one()
     assert refreshed.status == "archived"
+    assert refreshed.archived_reason == "SIM 1 is BLOCKED in TmLite"
 
     new_pairs = list((await session.execute(select(SimPair).where(SimPair.id != pair.id))).scalars())
     for new_pair in new_pairs:
@@ -279,6 +281,40 @@ async def test_two_idle_sims_still_get_paired(session):
     pairs = list((await session.execute(select(SimPair))).scalars())
     assert len(pairs) == 1
     assert {pairs[0].sim_a_id, pairs[0].sim_b_id} == {1, 2}
+
+
+async def test_two_idle_sims_on_the_same_gateway_are_not_paired(session):
+    await _seed_pairing_config(session)
+
+    sims = [_sim(1, "IDLE", gateway_id=42), _sim(2, "IDLE", gateway_id=42)]
+    with patch(f"{MODULE}.Client", lambda transport: _FleetMcpClient(sims)):
+        run = await SimPairingService.sync(session)
+
+    assert run.summary["created"] == 0
+    assert list((await session.execute(select(SimPair))).scalars()) == []
+
+
+async def test_sync_replaces_a_legacy_machine_name(session):
+    """A sync repairs old "SIM 894" labels before they can reach an SMS."""
+    await _seed_pairing_config(session)
+    session.add_all([
+        SimPairingSim(sim_id=1, display_name="SIM 894", country="CI"),
+        SimPairingSim(sim_id=2, display_name="Aminata", country="CI"),
+        SimPair(
+            sim_a_id=1, sim_b_id=2, sim_a_name="SIM 894", sim_b_name="Aminata",
+            country="CI", group_a="love", group_b="love", topic="business", target_messages=10,
+        ),
+    ])
+    await session.commit()
+
+    with patch(f"{MODULE}.Client", lambda transport: _FleetMcpClient([_sim(1, "IDLE"), _sim(2, "IDLE")])):
+        run = await SimPairingService.sync(session)
+
+    pair = (await session.execute(select(SimPair))).scalar_one()
+    assert pair.sim_a_name != "SIM 894"
+    assert not pair.sim_a_name.lower().startswith("sim ")
+    assert run.summary["names_assigned"] == 1
+    assert run.summary["pairs_named"] == 1
 
 
 async def test_existing_sim_names_survive_a_run_that_exhausts_the_pool(session):

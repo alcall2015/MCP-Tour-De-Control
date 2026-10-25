@@ -283,6 +283,17 @@ async def test_generate_message_rejects_a_machine_looking_label(session):
             await Service._generate_message(session, pair, None, config)
 
 
+async def test_generate_message_rejects_a_pair_with_a_legacy_machine_name(session):
+    await _configure(session)
+    pair = await _pair(session)
+    pair.sim_a_name = "SIM 894"
+    await session.commit()
+    config = (await session.execute(select(Config))).scalar_one()
+
+    with pytest.raises(RuntimeError, match="Pair has a machine-looking name"):
+        await Service._generate_message(session, pair, None, config)
+
+
 async def test_generate_message_accepts_the_same_message_without_the_label(session):
     config = await _configure(session)
     pair = await _pair(session)

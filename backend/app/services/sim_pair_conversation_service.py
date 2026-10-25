@@ -402,6 +402,10 @@ class SimPairConversationService:
 
     @staticmethod
     async def _generate_message(session, pair: SimPair, latest: SimPairMessage | None, config: Config) -> str:
+        # Do not let a legacy, unsynchronised pair leak its database identifier
+        # into a real SMS. The pairing sync replaces these labels with personas.
+        if any(SimPairConversationService.MACHINE_LABEL_PATTERN.search(name or "") for name in (pair.sim_a_name, pair.sim_b_name)):
+            raise RuntimeError("Pair has a machine-looking name; run SIM pairing sync before sending")
         history = list((await session.execute(
             select(SimPairMessage)
             .where(SimPairMessage.pair_id == pair.id, SimPairMessage.status == "sent")

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 
 from fastmcp import Client
@@ -58,6 +59,10 @@ class SimPairingService:
         "Sidiki", "Sanou", "Boureima", "Rasmané", "Tiémoko", "Yacouba",
         "Zoumana",
     )
+    # Older installations persisted labels such as "SIM 894" before the
+    # local-persona naming scheme was introduced. Keep recognising them so a
+    # normal sync repairs the stored name as well as new assignments.
+    MACHINE_LABEL_PATTERN = re.compile(r"^sim\s*\d+\s*$", re.IGNORECASE)
 
     @staticmethod
     async def sync(session):
@@ -85,11 +90,20 @@ class SimPairingService:
                     sims.extend(page)
                     if len(page) < 100:
                         break
+            sims_by_id = {sim["id"]: sim for sim in sims if sim.get("id") is not None}
             # Group and country membership is a static property of the SIM,
             # independent of its transient carrier state, so it is computed
             # once and then split two ways by state.
             candidates = {
-                sim["id"]: {"state": sim.get("state"), "country": countries_by_id.get(sim.get("gateway_id")) or countries_by_name.get(str(sim.get("gateway_name") or "").upper(), ""), "group": str(sim.get("sim_group_name") or "")}
+                sim["id"]: {
+                    "state": sim.get("state"),
+                    "country": countries_by_id.get(sim.get("gateway_id")) or countries_by_name.get(str(sim.get("gateway_name") or "").upper(), ""),
+                    "group": str(sim.get("sim_group_name") or ""),
+                    # Prefer the immutable TmLite id. A name is only a fallback
+                    # for older responses which omit it; an unknown gateway is
+                    # intentionally not safe to pair across.
+                    "gateway_key": SimPairingService._gateway_key(sim),
+                }
                 for sim in sims
                 if sim.get("id") is not None
                 and str(sim.get("sim_group_name") or "").lower() in group_names
@@ -112,7 +126,9 @@ class SimPairingService:
             for pair in active_pairs:
                 a, b = kept_alive.get(pair.sim_a_id), kept_alive.get(pair.sim_b_id)
                 if not a or not b or a["country"] != b["country"]:
-                    pair.status, pair.archived_reason, pair.archived_at = "archived", "SIM unavailable or no longer eligible", datetime.now(timezone.utc)
+                    pair.status = "archived"
+                    pair.archived_reason = SimPairingService._archive_reason(pair, sims_by_id, candidates, a, b, group_names)
+                    pair.archived_at = datetime.now(timezone.utc)
                     session.add(SimPairHistory(pair_id=pair.id, event="archived", details={"reason": pair.archived_reason}))
                     archived += 1
                 elif pair.sim_a_name != names[pair.sim_a_id] or pair.sim_b_name != names[pair.sim_b_id]:
@@ -144,7 +160,7 @@ class SimPairingService:
                     if counts[a_id] >= 3 or counts[b_id] >= 3 or frozenset((a_id, b_id)) in used:
                         continue
                     a, b = creatable[a_id], creatable[b_id]
-                    if a["country"] != b["country"]:
+                    if not a["gateway_key"] or not b["gateway_key"] or a["gateway_key"] == b["gateway_key"] or a["country"] != b["country"]:
                         continue
                     topic = topics[created % len(topics)]
                     pair = SimPair(
@@ -188,6 +204,34 @@ class SimPairingService:
         return value.get("items", value.get("data", value)) if isinstance(value, dict) else value
 
     @staticmethod
+    def _gateway_key(sim: dict) -> str | None:
+        gateway_id = sim.get("gateway_id")
+        if gateway_id is not None:
+            return f"id:{gateway_id}"
+        gateway_name = str(sim.get("gateway_name") or "").strip().lower()
+        return f"name:{gateway_name}" if gateway_name else None
+
+    @staticmethod
+    def _archive_reason(pair, sims_by_id, candidates, a, b, group_names) -> str:
+        """Return an operator-actionable reason when a pair can no longer run."""
+        for sim_id in (pair.sim_a_id, pair.sim_b_id):
+            raw = sims_by_id.get(sim_id)
+            if raw is None:
+                return f"SIM {sim_id} is no longer returned by TmLite"
+            state = str(raw.get("state") or "unknown").upper()
+            if state in SimPairingService.DURABLE_BAD_STATES:
+                return f"SIM {sim_id} is {state} in TmLite"
+            group = str(raw.get("sim_group_name") or "")
+            if group.lower() not in group_names:
+                return f"SIM {sim_id} moved to untracked group '{group or 'none'}'"
+            if sim_id not in candidates:
+                return f"SIM {sim_id} has no country mapping in TmLite"
+        # Both SIMs remain valid individually; the pair itself no longer has a
+        # valid country boundary. This is separate from transient BUSY/RINGING.
+        assert a is not None and b is not None
+        return f"SIM countries no longer match: {pair.sim_a_id} is {a['country']}, {pair.sim_b_id} is {b['country']}"
+
+    @staticmethod
     async def _ensure_sim_names(session, eligible):
         """Return one persistent, human-friendly label for every eligible SIM."""
         sim_ids = sorted(eligible)
@@ -207,6 +251,15 @@ class SimPairingService:
             record = by_id.get(sim_id)
             if record:
                 record.country = eligible[sim_id]["country"]
+                if not SimPairingService.MACHINE_LABEL_PATTERN.match(record.display_name.strip()):
+                    continue
+                # Reassign legacy machine labels before generating any more
+                # conversations. The old label remains in used_names, which is
+                # harmless and prevents a later collision with it.
+                base = next((name for name in SimPairingService.WEST_AFRICAN_NAMES if name not in used_names), None)
+                record.display_name = base or SimPairingService._compound_name(used_names)
+                used_names.add(record.display_name)
+                assigned += 1
                 continue
             base = next((name for name in SimPairingService.WEST_AFRICAN_NAMES if name not in used_names), None)
             display_name = base or SimPairingService._compound_name(used_names)
