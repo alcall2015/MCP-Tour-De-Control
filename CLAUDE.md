@@ -12,6 +12,7 @@ docker compose up --build          # backend runs `alembic upgrade head` then uv
 
 # Backend (from backend/, venv/ already exists)
 venv/bin/uvicorn app.main:app --reload            # :8000, /health
+PYTHONPATH=. venv/bin/python -m app.worker              # agent task worker (separate process)
 PYTHONPATH=. venv/bin/alembic upgrade head        # PYTHONPATH is required (env.py imports app.models)
 PYTHONPATH=. venv/bin/alembic revision --autogenerate -m "..."
 venv/bin/python -m pytest tests/ -v
@@ -46,7 +47,9 @@ This is arbitrary code execution by design — there is no sandbox, and the subp
 
 ### Agents
 
-`Agent` rows (`models/agent.py`) describe autonomous agents: objective, instructions, allowed MCP servers through the `agent_mcp_server` association table (cascade both sides), `max_steps` and `timeout_seconds`. Nothing executes them yet — this is the P0 "socle" of `docs/superpowers/specs/2026-10-24-agents-crud-design.md`. Lifecycle is `draft → active ⇄ paused → archived → draft`, enforced by `ALLOWED_TRANSITIONS` in `routers/agents.py`; activation requires at least one **enabled** authorised server, deletion is only allowed for `draft` and `archived`. The LLM model is inherited from the global `Config`, not stored per agent.
+`Agent` rows (`models/agent.py`) describe autonomous agents: objective, instructions, allowed MCP servers through the `agent_mcp_server` association table (cascade both sides), `max_steps`, `timeout_seconds` and an optional `cron_expr`. Lifecycle is `draft → active ⇄ paused → archived → draft`, enforced by `ALLOWED_TRANSITIONS` in `services/agent_service.py`; activation requires at least one **enabled** authorised server, deletion is only allowed for `draft` and `archived`. The LLM model is inherited from the global `Config`.
+
+Running an agent creates an `AgentTask` (`models/agent_task.py`) that snapshots objective, instructions and limits. The table is also the queue: `app/worker.py` (`python -m app.worker`, the `worker` compose service) claims tasks with `FOR UPDATE SKIP LOCKED` — at most one `queued` or `running` task per agent is enforced by the partial unique index `uq_agent_task_open_per_agent` (the claim SQL also locks the agent row) — heartbeats every 15 s, and a sweep marks tasks whose heartbeat is older than 90 s `failed` with `worker lost`; nothing is replayed. On SIGTERM the worker stops claiming, cancels in-flight runs and marks any task still `running` as `failed` (`worker stopped`); `finish` only ever applies to a `queued` or `running` task, so a sweep and a runner cannot overwrite each other. `services/agent_runner.py` runs *plan → tool loop → critique → report*: `max_steps` counts loop rounds only, `timeout_seconds` bounds the loop, and the two final phases get `AGENT_TASK_FINAL_GRACE_SECONDS` more. The **code** derives `outcome` (a criterion counts when `met` and confidence ≥ 0.5; all → `success`, none → `failed`, else `partial`); `status` is the run lifecycle, `outcome` the business result. Every event is an `AgentTaskStep` (`plan`, `turn`, `tool_call`, `critique`, `report`, `error`) and LLM-calling steps keep the **full prompt**; all writes go through `services/agent_task_service.py`, which `NOTIFY`s `agent_task_events`, and `GET /api/v1/agent-tasks/{id}/events` streams them over SSE via `LISTEN`. Per-agent cron jobs (`agent_{uuid}`) only enqueue; they skip when a task is already queued or running. **There is no approval step yet: every authorised tool runs immediately.** The chat and the runner share `services/llm_runtime.py` (`call_llm`, `call_mcp_tool`, `build_tool_defs`, `clean_schema`).
 
 ### Scheduling
 
