@@ -69,8 +69,9 @@ Indexes: `ix_agent_task_agent_created (agent_id, created_at DESC)`;
 `ix_agent_task_queue (created_at) WHERE status = 'queued'`;
 `ix_agent_task_running (agent_id) WHERE status = 'running'` (serves the
 per-agent exclusivity check);
-`uq_agent_task_open_per_agent (agent_id) UNIQUE WHERE status IN ('queued','running')`
-(enforces it).
+`uq_agent_task_open_per_agent (agent_id) UNIQUE WHERE status NOT IN
+('completed','failed','cancelled')` (enforces it — phrased as "not final" so a
+later open state such as `waiting_approval` stays covered without a migration).
 
 Snapshots exist so that editing an agent never changes a task already in
 flight; the task page shows the snapshot, not the current agent.
@@ -124,7 +125,14 @@ environment as the backend; `docker-compose.yml` gains a `worker` service.
 
 Settings (via `app.config.settings`): `AGENT_WORKER_CONCURRENCY` (default 2),
 `AGENT_TASK_HEARTBEAT_SECONDS` (15), `AGENT_TASK_STALE_SECONDS` (90),
-`AGENT_TASK_FINAL_GRACE_SECONDS` (90).
+`AGENT_TASK_FINAL_GRACE_SECONDS` (90), `LLM_CALL_TIMEOUT_SECONDS` (120),
+`MCP_TOOL_TIMEOUT_SECONDS` (120).
+
+Every outbound call is bounded: `LLM_CALL_TIMEOUT_SECONDS` is passed to the
+provider client (`request_options` for Google) and `MCP_TOOL_TIMEOUT_SECONDS`
+wraps `call_tool`, whose timeout is reported like any other tool error. Without
+them a provider that never answers would hang a task behind a heartbeat that
+keeps it looking alive.
 
 ### Claim
 
@@ -159,6 +167,11 @@ marks any `running` task whose heartbeat is older than
 `AGENT_TASK_STALE_SECONDS` as `failed` with `error = "worker lost"` and an
 `error` step. Nothing is replayed: tool calls are not idempotent and resume is
 sub-project 5.
+
+The heartbeat is itself bounded: past `timeout_seconds +
+AGENT_TASK_FINAL_GRACE_SECONDS + LLM_CALL_TIMEOUT_SECONDS` the beater logs
+`agent_task_heartbeat_budget_exhausted` and stops, so a run wedged in a call
+that never returns becomes stale and the sweep can reclaim it.
 
 ### Cancellation
 
@@ -274,7 +287,11 @@ It then `LISTEN`s on `agent_task_events` and, for each notification about
 this task, loads steps with `seq` greater than the last one sent and emits
 them, plus a `status` event when the status changed. When the status is
 final it emits `done` and closes. If the task is already final on connect it
-sends the backlog, `status`, `done`. A keep-alive comment is written every
+sends the backlog, `status`, `done`. If the task has disappeared under the
+stream it emits a `status` of `gone`, then `done`. The `LISTEN` connection
+comes from a dedicated non-pooled engine (`NullPool`), not from the request
+pool: it is held for the whole life of the stream, and a handful of open task
+pages would otherwise starve the rest of the API. A keep-alive comment is written every
 20 seconds so proxies keep the connection open. Event names: `step`,
 `status`, `done`, `error`.
 
