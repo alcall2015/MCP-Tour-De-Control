@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { deleteAgent, listAgents, setAgentStatus } from "../../lib/api";
+import { cancelAgentTask, deleteAgent, listAgents, setAgentStatus } from "../../lib/api";
 import type { Agent, AgentStatus } from "../../lib/api";
 import { AgentCard } from "./AgentCard";
+import { RunAgentModal } from "./RunAgentModal";
 import { Spinner } from "../ui/Spinner";
 
 interface Props {
@@ -14,12 +15,18 @@ interface Props {
 export function AgentList({ view, onEdit, onCreate }: Props) {
   const queryClient = useQueryClient();
   const status: AgentStatus | undefined = view === "archived" ? "archived" : undefined;
-  const { data: agents = [], isLoading } = useQuery({ queryKey: ["agents", status ?? "all"], queryFn: () => listAgents(status) });
+  const { data: agents = [], isLoading } = useQuery({
+    queryKey: ["agents", status ?? "all"],
+    queryFn: () => listAgents(status),
+    refetchInterval: (query) => query.state.data?.some((a) => a.running_task_id) ? 5000 : false,
+  });
   const [errors, setErrors] = useState<Record<string, unknown>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [runAgent, setRunAgent] = useState<Agent | null>(null);
 
   const statusMut = useMutation({ mutationFn: ({ id, status }: { id: string; status: AgentStatus }) => setAgentStatus(id, status) });
   const deleteMut = useMutation({ mutationFn: (id: string) => deleteAgent(id) });
+  const cancelMut = useMutation({ mutationFn: (taskId: string) => cancelAgentTask(taskId) });
 
   // Tracks busy state and the per-card error around one mutation; `mutateAsync` rejects on failure.
   const run = async (id: string, call: () => Promise<unknown>) => {
@@ -32,6 +39,7 @@ export function AgentList({ view, onEdit, onCreate }: Props) {
     } finally {
       setBusyId(null);
       queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["agent-tasks"] });
     }
   };
 
@@ -54,18 +62,23 @@ export function AgentList({ view, onEdit, onCreate }: Props) {
   }
 
   return (
-    <div className="space-y-3">
-      {agents.map((agent) => (
-        <AgentCard
-          key={agent.id}
-          agent={agent}
-          busy={busyId === agent.id}
-          error={errors[agent.id]}
-          onEdit={onEdit}
-          onStatus={(a, s) => run(a.id, () => statusMut.mutateAsync({ id: a.id, status: s }))}
-          onDelete={(a) => run(a.id, () => deleteMut.mutateAsync(a.id))}
-        />
-      ))}
-    </div>
+    <>
+      <div className="space-y-3">
+        {agents.map((agent) => (
+          <AgentCard
+            key={agent.id}
+            agent={agent}
+            busy={busyId === agent.id}
+            error={errors[agent.id]}
+            onEdit={onEdit}
+            onStatus={(a, s) => run(a.id, () => statusMut.mutateAsync({ id: a.id, status: s }))}
+            onDelete={(a) => run(a.id, () => deleteMut.mutateAsync(a.id))}
+            onRun={(a) => setRunAgent(a)}
+            onCancelTask={(a) => a.running_task_id && run(a.id, () => cancelMut.mutateAsync(a.running_task_id!))}
+          />
+        ))}
+      </div>
+      <RunAgentModal open={runAgent !== null} agent={runAgent} onClose={() => setRunAgent(null)} />
+    </>
   );
 }
