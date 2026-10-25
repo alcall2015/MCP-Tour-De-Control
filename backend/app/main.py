@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.database import async_session
 from app.models import McpServer, Prompt
 from app.routers import activity as activity_router
+from app.routers import agent_tasks as agent_tasks_router
 from app.routers import agents as agents_router
 from app.routers import chat as chat_router
 from app.routers import config as config_router
@@ -116,6 +117,7 @@ app.add_middleware(
 )
 
 app.include_router(agents_router.router)
+app.include_router(agent_tasks_router.router)
 app.include_router(config_router.router)
 app.include_router(executions_router.router)
 app.include_router(mcp_servers_router.router)

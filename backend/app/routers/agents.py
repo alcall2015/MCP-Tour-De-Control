@@ -7,10 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
-from app.models import Agent, McpServer
-from app.schemas import AgentCreate, AgentRead, AgentServerRef, AgentStatusUpdate, AgentUpdate
+from app.models import Agent, AgentTask, McpServer
+from app.schemas import AgentCreate, AgentRead, AgentServerRef, AgentStatusUpdate, AgentTaskRead, AgentUpdate
 from app.schemas.agent import AgentStatus
+from app.schemas.agent_task import AgentTaskCreate
 from app.services.agent_service import AgentService, AgentStateError
+from app.services.agent_task_service import AgentTaskService, TaskConflict
 from app.services.scheduler_service import scheduler_service
 
 log = structlog.get_logger()
@@ -126,3 +128,23 @@ async def set_agent_status(agent_id: uuid.UUID, data: AgentStatusUpdate, session
     except AgentStateError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     return _to_read(agent, (await AgentService.task_summaries(session, [agent.id]))[agent.id])
+
+
+@router.post("/{agent_id}/tasks", response_model=AgentTaskRead, status_code=201)
+async def create_task(agent_id: uuid.UUID, data: AgentTaskCreate, session: AsyncSession = Depends(get_async_session)):
+    agent = await _get_agent(session, agent_id)
+    try:
+        task = await AgentTaskService.enqueue(session, agent, objective=data.objective, trigger="manual")
+    except TaskConflict as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    return AgentTaskRead.model_validate(task)
+
+
+@router.get("/{agent_id}/tasks", response_model=list[AgentTaskRead])
+async def list_tasks(agent_id: uuid.UUID, limit: int = Query(default=20, ge=1, le=100), offset: int = Query(default=0, ge=0),
+                     session: AsyncSession = Depends(get_async_session)):
+    await _get_agent(session, agent_id)
+    rows = (await session.execute(
+        select(AgentTask).where(AgentTask.agent_id == agent_id).order_by(AgentTask.created_at.desc()).limit(limit).offset(offset)
+    )).scalars().all()
+    return [AgentTaskRead.model_validate(t) for t in rows]
