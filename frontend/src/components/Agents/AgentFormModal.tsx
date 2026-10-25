@@ -73,7 +73,7 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
       <form onSubmit={submit} className="space-y-5">
         <div>
           <label className={labelClass} style={labelStyle}>Name</label>
-          <input className="input-field" placeholder="Log analyst" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="input-field" placeholder="Log analyst" maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
 
         <div>
