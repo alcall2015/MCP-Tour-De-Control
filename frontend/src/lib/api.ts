@@ -93,6 +93,20 @@ export const deleteAgent = (id: string) =>
   request<void>(`/agents/${id}`, { method: "DELETE" });
 export const setAgentStatus = (id: string, status: AgentStatus) =>
   request<Agent>(`/agents/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) });
+export const createAgentTask = (agentId: string, objective: string | null) =>
+  request<AgentTask>(`/agents/${agentId}/tasks`, { method: "POST", body: JSON.stringify({ objective }) });
+export const listAgentTasks = (agentId: string, params: { limit?: number; offset?: number } = {}) => {
+  const query = new URLSearchParams();
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.offset) query.set("offset", String(params.offset));
+  const qs = query.toString();
+  return request<AgentTask[]>(`/agents/${agentId}/tasks${qs ? `?${qs}` : ""}`);
+};
+export const getAgentTask = (taskId: string) => request<AgentTaskDetail>(`/agent-tasks/${taskId}`);
+export const getAgentTaskStep = (taskId: string, seq: number) =>
+  request<AgentTaskStepDetail>(`/agent-tasks/${taskId}/steps/${seq}`);
+export const cancelAgentTask = (taskId: string) =>
+  request<AgentTask>(`/agent-tasks/${taskId}/cancel`, { method: "POST" });
 
 // Scripts
 export const listScripts = (promptId: string) =>
@@ -285,6 +299,9 @@ export interface Agent {
   created_at: string;
   updated_at: string;
   mcp_servers: AgentServerRef[];
+  cron_expr: string | null;
+  running_task_id: string | null;
+  last_task: AgentTaskSummary | null;
 }
 export interface AgentCreate {
   name: string;
@@ -294,8 +311,86 @@ export interface AgentCreate {
   max_steps?: number;
   timeout_seconds?: number;
   mcp_server_ids: string[];
+  cron_expr?: string | null;
 }
 export type AgentUpdate = Partial<AgentCreate>;
+
+// Agent tasks (execution)
+export type AgentTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type AgentOutcome = "success" | "partial" | "failed";
+export type StepKind = "plan" | "turn" | "tool_call" | "critique" | "report" | "error";
+export const FINAL_TASK_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
+export interface AgentTaskSummary {
+  id: string;
+  status: AgentTaskStatus;
+  outcome: AgentOutcome | null;
+  finished_at: string | null;
+}
+export interface AgentPlan {
+  steps: { title: string; tools: string[] }[];
+  success_criteria: { id: string; description: string }[];
+  risks: string[];
+}
+export interface AgentCritique {
+  criteria: { id: string; met: boolean; confidence: number; justification: string }[];
+  limit_hit: "max_steps" | "timeout" | null;
+}
+export interface AgentReport {
+  summary: string;
+  actions: { step_seq: number; description: string }[];
+  evidence: string[];
+  uncertainties: string[];
+  next_steps: string[];
+}
+export interface AgentTask {
+  id: string;
+  agent_id: string;
+  trigger: "manual" | "cron";
+  objective: string;
+  instructions: string;
+  max_steps: number;
+  timeout_seconds: number;
+  status: AgentTaskStatus;
+  outcome: AgentOutcome | null;
+  plan: AgentPlan | null;
+  critique: AgentCritique | null;
+  report: AgentReport | null;
+  error: string | null;
+  cancel_requested: boolean;
+  step_count: number;
+  tokens_in: number;
+  tokens_out: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+export interface AgentTaskStep {
+  seq: number;
+  kind: StepKind;
+  payload: Record<string, unknown>;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+export interface AgentTaskStepDetail extends AgentTaskStep {
+  prompt: Record<string, unknown>[] | null;
+}
+export interface AgentTaskDetail extends AgentTask {
+  steps: AgentTaskStep[];
+}
+export interface TaskStatusEvent {
+  status: AgentTaskStatus | "gone";
+  outcome: AgentOutcome | null;
+  error: string | null;
+  finished_at: string | null;
+}
+export type AgentTaskEvent =
+  | { event: "step"; data: AgentTaskStep }
+  | { event: "status"; data: TaskStatusEvent }
+  | { event: "done"; data: Record<string, never> }
+  | { event: "error"; data: { message: string } };
+
 export interface Script {
   id: string;
   prompt_id: string;
@@ -441,9 +536,10 @@ export interface SSEEvent {
   data: Record<string, unknown>;
 }
 
-export function parseSSEStream(
+/** Reads SSE frames (`event:` + `data:` JSON) and calls onEvent per frame; comment lines (`: keep-alive`) are ignored. */
+export function parseSSE(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  onEvent: (event: SSEEvent) => void,
+  onEvent: (event: string, data: Record<string, unknown>) => void,
 ): Promise<void> {
   const decoder = new TextDecoder();
   let buffer = "";
@@ -462,7 +558,7 @@ export function parseSSEStream(
       } else if (line.startsWith("data: ") && currentEvent) {
         try {
           const data = JSON.parse(line.slice(6));
-          onEvent({ event: currentEvent as SSEEvent["event"], data });
+          onEvent(currentEvent, data);
         } catch { /* skip malformed */ }
         currentEvent = "";
       }
@@ -470,6 +566,33 @@ export function parseSSEStream(
 
     return reader.read().then(process);
   });
+}
+
+/** Chat-typed wrapper kept for the existing chat components. */
+export function parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onEvent: (event: SSEEvent) => void,
+): Promise<void> {
+  return parseSSE(reader, (event, data) => onEvent({ event: event as SSEEvent["event"], data }));
+}
+
+/** Streams a task's steps and status until the server sends `done` or `signal` aborts. */
+export async function streamAgentTask(
+  taskId: string,
+  onEvent: (e: AgentTaskEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${BASE}/agent-tasks/${taskId}/events`, { headers: { Accept: "text/event-stream" }, signal });
+  if (!res.ok || !res.body) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(error.detail || res.statusText);
+  }
+  const reader = res.body.getReader();
+  try {
+    await parseSSE(reader, (event, data) => onEvent({ event, data } as AgentTaskEvent));
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 // Activity
