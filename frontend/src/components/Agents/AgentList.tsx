@@ -7,7 +7,7 @@ import { AgentCard } from "./AgentCard";
 import { RunAgentModal } from "./RunAgentModal";
 import { Spinner } from "../ui/Spinner";
 
-/** A run still in flight: queued counts too, since `running_task_id` is set only once the worker picks the task up. */
+/** A run still in flight: queued and waiting_approval count too, since running_task_id is set only while the worker holds the task. */
 const hasOpenTask = (agent: Agent) => Boolean(agent.last_task && !FINAL_TASK_STATUSES.has(agent.last_task.status));
 
 interface Props {

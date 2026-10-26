@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import { listAgents, listPrompts, listMcpServers } from "../../lib/api";
+import { listAgents, listApprovals, listPrompts, listMcpServers } from "../../lib/api";
 
 type IconName = "automation" | "agent" | "reports" | "activity" | "sim" | "sms" | "stress" | "chat" | "settings";
 
@@ -36,10 +36,11 @@ function SystemStatus() {
   const { data: servers = [] } = useQuery({ queryKey: ["mcp-servers"], queryFn: listMcpServers, refetchInterval: 30000 });
   const { data: prompts = [] } = useQuery({ queryKey: ["prompts"], queryFn: listPrompts, refetchInterval: 30000 });
   const { data: agents = [] } = useQuery({ queryKey: ["agents", "all"], queryFn: () => listAgents(), refetchInterval: 30000 });
+  const { data: pendingApprovals = [] } = useQuery({ queryKey: ["approvals", "pending"], queryFn: () => listApprovals("pending"), refetchInterval: 30000 });
   const activeServers = servers.filter((server) => server.enabled).length;
   const activePrompts = prompts.filter((prompt) => prompt.enabled).length;
   const activeAgents = agents.filter((agent) => agent.status === "active").length;
-  return <div className="system-status"><span className="system-status-title">System status</span><div className="system-status-line"><i className={activeServers ? "is-live" : ""}/><span>MCP servers</span><b>{activeServers}</b></div><div className="system-status-line"><i className={activePrompts ? "is-warm" : ""}/><span>Active flows</span><b>{activePrompts}</b></div><div className="system-status-line"><i className={activeAgents ? "is-live" : ""}/><span>Active agents</span><b>{activeAgents}</b></div></div>;
+  return <div className="system-status"><span className="system-status-title">System status</span><div className="system-status-line"><i className={activeServers ? "is-live" : ""}/><span>MCP servers</span><b>{activeServers}</b></div><div className="system-status-line"><i className={activePrompts ? "is-warm" : ""}/><span>Active flows</span><b>{activePrompts}</b></div><div className="system-status-line"><i className={activeAgents ? "is-live" : ""}/><span>Active agents</span><b>{activeAgents}</b></div><div className="system-status-line"><i className={pendingApprovals.length ? "is-warm" : ""}/><span>Pending approvals</span><b>{pendingApprovals.length}</b></div></div>;
 }
 
 function ThemeToggle() {

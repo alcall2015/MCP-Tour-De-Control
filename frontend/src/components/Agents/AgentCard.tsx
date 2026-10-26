@@ -32,7 +32,7 @@ export function AgentCard({ agent, busy, error, onEdit, onStatus, onDelete, onRu
   const [showTasks, setShowTasks] = useState(false);
   const badge = BADGE[agent.status];
   const updated = new Date(agent.updated_at).toLocaleString();
-  // `running_task_id` is set only once the worker picks the task up: a queued task is still a run in flight.
+  // A run still in flight: queued and waiting_approval count too, since running_task_id is set only while the worker holds the task.
   const openTask = agent.last_task && !FINAL_TASK_STATUSES.has(agent.last_task.status) ? agent.last_task : null;
 
   const { data: recent = [], isLoading: loadingTasks } = useQuery({

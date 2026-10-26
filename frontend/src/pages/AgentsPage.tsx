@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Agent } from "../lib/api";
 import { AgentList } from "../components/Agents/AgentList";
 import { AgentFormModal } from "../components/Agents/AgentFormModal";
+import { PendingApprovalsStrip } from "../components/Agents/PendingApprovalsStrip";
 
 export function AgentsPage() {
   const [view, setView] = useState<"active" | "archived">("active");
@@ -29,6 +30,8 @@ export function AgentsPage() {
         </div>
         <button type="button" onClick={openCreate} className="btn-primary">+ New Agent</button>
       </div>
+
+      <PendingApprovalsStrip />
 
       <div className="flex gap-2">
         {tab("active", "Active")}
