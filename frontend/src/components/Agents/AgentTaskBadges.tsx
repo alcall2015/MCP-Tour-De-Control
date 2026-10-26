@@ -4,6 +4,7 @@ import type { AgentOutcome, AgentTaskStatus } from "../../lib/api";
 const STATUS: Record<AgentTaskStatus | "gone", { color: string; bg: string; border: string; label: string; pulse?: boolean }> = {
   queued:    { color: "var(--text-secondary)", bg: "rgba(148, 163, 184, 0.12)", border: "rgba(148, 163, 184, 0.3)", label: "Queued" },
   running:   { color: "var(--running)",        bg: "rgba(96, 165, 250, 0.12)",  border: "rgba(96, 165, 250, 0.3)",  label: "Running", pulse: true },
+  waiting_approval: { color: "var(--warning)", bg: "rgba(251, 191, 36, 0.12)",  border: "rgba(251, 191, 36, 0.35)", label: "Waiting approval", pulse: true },
   completed: { color: "var(--success)",        bg: "rgba(52, 211, 153, 0.10)",  border: "rgba(52, 211, 153, 0.3)",  label: "Completed" },
   failed:    { color: "var(--error)",          bg: "rgba(248, 113, 113, 0.12)", border: "rgba(248, 113, 113, 0.35)", label: "Failed" },
   cancelled: { color: "var(--text-muted)",     bg: "rgba(100, 116, 139, 0.10)", border: "rgba(100, 116, 139, 0.3)", label: "Cancelled" },

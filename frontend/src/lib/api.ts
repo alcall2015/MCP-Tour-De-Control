@@ -317,9 +317,9 @@ export interface AgentCreate {
 export type AgentUpdate = Partial<AgentCreate>;
 
 // Agent tasks (execution)
-export type AgentTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type AgentTaskStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
 export type AgentOutcome = "success" | "partial" | "failed";
-export type StepKind = "plan" | "turn" | "tool_call" | "critique" | "report" | "error";
+export type StepKind = "plan" | "turn" | "tool_call" | "critique" | "report" | "error" | "approval_requested";
 export const FINAL_TASK_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 export interface AgentTaskSummary {
   id: string;

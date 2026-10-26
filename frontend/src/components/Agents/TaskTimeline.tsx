@@ -5,6 +5,7 @@ import type { AgentTaskStep, StepKind } from "../../lib/api";
 
 const KIND_LABEL: Record<StepKind, string> = {
   plan: "Plan", turn: "Model turn", tool_call: "Tool call", critique: "Self-critique", report: "Report", error: "Error",
+  approval_requested: "Approval requested",
 };
 const LLM_KINDS: ReadonlySet<StepKind> = new Set(["plan", "turn", "critique", "report"]);
 
