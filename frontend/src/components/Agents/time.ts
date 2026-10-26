@@ -17,3 +17,14 @@ export function formatDuration(startIso: string | null, endIso: string | null): 
   const sec = Math.max(0, Math.round((end - new Date(startIso).getTime()) / 1000));
   return sec < 60 ? `${sec} s` : `${Math.floor(sec / 60)} min ${sec % 60} s`;
 }
+
+/** "expires in 3 h 12 min" / "expires in 40 s" / "expired" for a future deadline. */
+export function timeLeft(iso: string | null): string {
+  if (!iso) return "";
+  const sec = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  if (sec <= 0) return "expired";
+  if (sec < 60) return `expires in ${sec} s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `expires in ${min} min`;
+  return `expires in ${Math.floor(min / 60)} h ${min % 60} min`;
+}

@@ -29,6 +29,18 @@ export const deleteMcpServer = (id: string) =>
 export const testMcpServer = (id: string) =>
   request<McpTestResult>(`/mcp-servers/${id}/test`, { method: "POST" });
 
+// Tool policies (risk levels)
+export const listServerTools = (serverId: string) => request<ToolPolicy[]>(`/mcp-servers/${serverId}/tools`);
+export const setToolPolicy = (serverId: string, toolName: string, level: RiskLevel) =>
+  request<ToolPolicy>(`/mcp-servers/${serverId}/tools/${encodeURIComponent(toolName)}`, { method: "PUT", body: JSON.stringify({ risk_level: level }) });
+
+// Approvals
+export const listApprovals = (status: ApprovalStatus = "pending") => request<Approval[]>(`/approvals?status=${status}`);
+export const approveApproval = (id: string, reason?: string | null) =>
+  request<Approval>(`/approvals/${id}/approve`, { method: "POST", body: JSON.stringify({ reason: reason || null }) });
+export const rejectApproval = (id: string, reason?: string | null) =>
+  request<Approval>(`/approvals/${id}/reject`, { method: "POST", body: JSON.stringify({ reason: reason || null }) });
+
 // SIM pairing
 export const listSimPairingGroups = () => request<SimPairingGroup[]>("/sim-pairing/groups");
 export const createSimPairingGroup = (data: SimPairingGroupCreate) =>
@@ -176,6 +188,12 @@ export interface Config {
   sms_autoreply_max_per_run: number;
   sms_autoreply_lookback_minutes: number;
   sms_autoreply_recipient_cooldown_hours: number;
+  approval_expiry_hours: number;
+  approval_whatsapp_enabled: boolean;
+  approval_whatsapp_number: string;
+  approval_whatsapp_server_id: string | null;
+  approval_whatsapp_session_id: string | null;
+  approval_whatsapp_template: string;
 }
 export interface ConfigUpdate {
   llm_provider?: string;
@@ -204,6 +222,12 @@ export interface ConfigUpdate {
   sms_autoreply_max_per_run?: number;
   sms_autoreply_lookback_minutes?: number;
   sms_autoreply_recipient_cooldown_hours?: number;
+  approval_expiry_hours?: number;
+  approval_whatsapp_enabled?: boolean;
+  approval_whatsapp_number?: string;
+  approval_whatsapp_server_id?: string | null;
+  approval_whatsapp_session_id?: string | null;
+  approval_whatsapp_template?: string;
 }
 export interface McpServer {
   id: string;
@@ -236,6 +260,19 @@ export interface McpTestResult {
   success: boolean;
   tools: McpToolInfo[];
   error: string | null;
+}
+// Risk levels: the single source of labels for every screen.
+export type RiskLevel = 0 | 1 | 2 | 3;
+export const RISK_LEVELS: readonly { level: RiskLevel; code: string; label: string; hint: string }[] = [
+  { level: 0, code: "R0", label: "Read-only", hint: "Lists, reads, searches" },
+  { level: 1, code: "R1", label: "Limited writes", hint: "Reversible, low-impact changes" },
+  { level: 2, code: "R2", label: "Significant changes", hint: "Sends, updates, money, external effects" },
+  { level: 3, code: "R3", label: "Destructive or irreversible", hint: "Deletes, purges, resets. Never automatic" },
+];
+export interface ToolPolicy {
+  name: string;
+  description: string | null;
+  risk_level: RiskLevel;
 }
 export interface SimPairingGroup {
   id: string;
@@ -301,6 +338,7 @@ export interface Agent {
   updated_at: string;
   mcp_servers: AgentServerRef[];
   cron_expr: string | null;
+  max_auto_risk: RiskLevel;
   running_task_id: string | null;
   last_task: AgentTaskSummary | null;
 }
@@ -313,6 +351,7 @@ export interface AgentCreate {
   timeout_seconds?: number;
   mcp_server_ids: string[];
   cron_expr?: string | null;
+  max_auto_risk?: RiskLevel;
 }
 export type AgentUpdate = Partial<AgentCreate>;
 
@@ -379,8 +418,34 @@ export interface AgentTaskStep {
 export interface AgentTaskStepDetail extends AgentTaskStep {
   prompt: Record<string, unknown>[] | null;
 }
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
+export interface Approval {
+  id: string;
+  task_id: string;
+  agent_id: string;
+  agent_name: string | null;
+  task_objective: string | null;
+  step_seq: number;
+  call_index: number;
+  tool_name: string;
+  server_name: string;
+  args: Record<string, unknown>;
+  risk_level: RiskLevel;
+  code: string;
+  status: ApprovalStatus;
+  requested_at: string;
+  expires_at: string;
+  seconds_left: number;
+  decided_at: string | null;
+  decided_by: string | null;
+  decision_reason: string | null;
+  notified_at: string | null;
+  notify_error: string | null;
+  consumed_at: string | null;
+}
 export interface AgentTaskDetail extends AgentTask {
   steps: AgentTaskStep[];
+  approval: Approval | null;
 }
 export interface TaskStatusEvent {
   status: AgentTaskStatus | "gone";
