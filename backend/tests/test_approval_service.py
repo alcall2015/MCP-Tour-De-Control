@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models import Agent, AgentTask, AgentTaskStep, Approval, Config, McpServer
+from app.models.approval import CODE_ALPHABET
 from app.services.agent_task_service import AgentTaskService, TaskConflict
 from app.services.approval_service import ApprovalConflict, ApprovalService, canonical_hash
 
@@ -40,7 +41,8 @@ async def test_request_creates_pending_approval_and_parks(session):
     approval = await request(session, task)
     await session.refresh(task)
     assert task.status == "waiting_approval"
-    assert approval.status == "pending" and len(approval.code) == 6 and approval.code.isupper()
+    assert approval.status == "pending" and len(approval.code) == 6
+    assert all(c in CODE_ALPHABET for c in approval.code)
     assert approval.args_hash == canonical_hash({"a": 1})
     assert timedelta(hours=1, minutes=59) < approval.expires_at - before < timedelta(hours=2, minutes=1)
     steps = (await session.execute(select(AgentTaskStep).where(AgentTaskStep.task_id == task.id).order_by(AgentTaskStep.seq))).scalars().all()
@@ -68,6 +70,22 @@ async def test_codes_are_unique_among_open_approvals(session):
         mod._new_code = original
     assert second.code == "ZZZZZ9"
 
+    # a code held by a non-pending approval (e.g. expired) is reusable
+    first.status = "expired"
+    await session.commit()
+    agent3 = Agent(name="c", objective="o", status="active", mcp_servers=[McpServer(name="s3", transport="http", url="http://z", enabled=True)])
+    session.add(agent3)
+    await session.commit()
+    await AgentTaskService.enqueue(session, agent3, objective=None, trigger="manual")
+    task3 = await AgentTaskService.claim(session, "w")
+    await AgentTaskService.record_step(session, task3, "turn", {"text": None, "tool_calls": []})
+    mod._new_code = lambda: first.code
+    try:
+        third = await request(session, task3)
+    finally:
+        mod._new_code = original
+    assert third.code == first.code
+
 
 async def test_approve_resumes_and_is_single_shot(session):
     agent, task = await running_task(session)
@@ -76,12 +94,14 @@ async def test_approve_resumes_and_is_single_shot(session):
     await session.refresh(task)
     assert decided.status == "approved" and decided.decided_by == "ui" and decided.decided_at is not None
     assert task.status == "queued"
+    task_id = task.id  # captured before decide()'s conflict-branch rollback expires `task`
     with pytest.raises(ApprovalConflict):
         await ApprovalService.decide(session, approval, approve=False, decided_by="ui", reason="late")
-    pending = await ApprovalService.decided_unconsumed(session, task.id)
+    pending = await ApprovalService.decided_unconsumed(session, task_id)
     assert pending is not None and pending.id == approval.id
-    await ApprovalService.mark_consumed(session, approval)
-    assert await ApprovalService.decided_unconsumed(session, task.id) is None
+    assert await ApprovalService.mark_consumed(session, approval) is True
+    assert await ApprovalService.decided_unconsumed(session, task_id) is None
+    assert await ApprovalService.mark_consumed(session, approval) is False
 
 
 async def test_reject_resumes_with_reason(session):
@@ -138,6 +158,31 @@ async def test_expire_due_fails_the_task(session):
     steps = (await session.execute(select(AgentTaskStep).where(AgentTaskStep.task_id == task.id).order_by(AgentTaskStep.seq))).scalars().all()
     assert steps[-1].kind == "error" and steps[-1].payload["phase"] == "approval"
     assert await ApprovalService.expire_due(session) == 0
+
+
+async def test_expire_due_does_not_overwrite_a_decision_made_just_before_it_runs(session):
+    agent, task = await running_task(session, expiry_hours=1)
+    approval = await request(session, task)
+    approval.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await session.commit()
+    # Simulates the race: a decide() commits in the window between expire_due's
+    # due-row scan and its per-row UPDATE. Here it simply runs first.
+    await ApprovalService.decide(session, approval, approve=True, decided_by="ui", reason=None)
+    assert await ApprovalService.expire_due(session) == 0
+    await session.refresh(task)
+    await session.refresh(approval)
+    assert approval.status == "approved" and task.status == "queued"
+
+
+async def test_request_when_task_no_longer_running_expires_the_approval_and_raises(session):
+    agent, task = await running_task(session)
+    await AgentTaskService.finish(session, task, "failed", error="worker lost")
+    with pytest.raises(ApprovalConflict):
+        await request(session, task)
+    approval = (await session.execute(
+        select(Approval).where(Approval.task_id == task.id)
+    )).scalars().first()
+    assert approval is None or approval.status == "expired"
 
 
 async def test_list_pending_oldest_first_and_set_notified(session):

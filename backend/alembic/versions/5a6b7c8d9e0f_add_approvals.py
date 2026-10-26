@@ -75,9 +75,11 @@ def upgrade():
     )
     op.create_index("ix_approval_pending", "approval", ["expires_at"], postgresql_where=sa.text("status = 'pending'"))
     op.create_index("ix_approval_task", "approval", ["task_id", "step_seq"])
+    op.create_index("uq_approval_code_pending", "approval", ["code"], unique=True, postgresql_where=sa.text("status = 'pending'"))
 
 
 def downgrade():
+    op.drop_index("uq_approval_code_pending", table_name="approval")
     op.drop_index("ix_approval_task", table_name="approval")
     op.drop_index("ix_approval_pending", table_name="approval")
     op.drop_table("approval")

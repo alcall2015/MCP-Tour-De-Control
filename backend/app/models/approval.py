@@ -41,4 +41,5 @@ class Approval(Base):
         CheckConstraint("risk_level BETWEEN 0 AND 3", name="ck_approval_risk_level"),
         Index("ix_approval_pending", "expires_at", postgresql_where=text("status = 'pending'")),
         Index("ix_approval_task", "task_id", "step_seq"),
+        Index("uq_approval_code_pending", "code", unique=True, postgresql_where=text("status = 'pending'")),
     )

@@ -31,7 +31,7 @@ class ApprovalConflict(Exception):
 
 
 def canonical_hash(args: dict) -> str:
-    return hashlib.sha256(json.dumps(args, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(args, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _new_code() -> str:
@@ -72,7 +72,10 @@ class ApprovalService:
             "approval_id": str(approval.id), "tool": tool_name, "server": server_name, "args": args,
             "risk_level": risk_level, "code": approval.code, "expires_at": approval.expires_at.isoformat(),
         })
-        await AgentTaskService.park(session, task)
+        parked = await AgentTaskService.park(session, task)
+        if not parked:
+            await ApprovalService.expire_for_task(session, task.id, decided_by="system:cancel")
+            raise ApprovalConflict("task is no longer running")
         await session.refresh(approval)
         log.info("approval_requested", approval_id=str(approval.id), task_id=str(task.id), tool=tool_name, code=approval.code)
         return approval
@@ -86,13 +89,18 @@ class ApprovalService:
             .values(status=new_status, decided_at=func.now(), decided_by=decided_by, decision_reason=reason)
         )
         if result.rowcount == 0:
-            # No row matched, so nothing was written: a full session.rollback()
-            # here would be a no-op for our own change but would collaterally
-            # expire every other object the caller holds (e.g. the task), which
-            # then raises MissingGreenlet on next plain attribute access under
-            # asyncio. Just refresh this one object to see its true status.
-            await session.refresh(approval)
-            raise ApprovalConflict(f"Approval is already {approval.status}")
+            # No row matched, so nothing was written. Read the true status with
+            # a plain scalar select *before* rolling back, then roll back to
+            # close out the dangling transaction (avoids freezing func.now()
+            # for this session and leaving a transaction open on what may be a
+            # long-lived scheduler session). Callers that need to keep using
+            # other objects held in this session across the raise should
+            # capture any needed attributes (e.g. task.id) before calling us.
+            status = (await session.execute(
+                select(Approval.status).where(Approval.id == approval.id)
+            )).scalar_one()
+            await session.rollback()
+            raise ApprovalConflict(f"Approval is already {status}")
         await session.commit()
         await session.refresh(approval)
         log.info("approval_decided", approval_id=str(approval.id), status=new_status, decided_by=decided_by)
@@ -116,11 +124,12 @@ class ApprovalService:
         )).scalar_one_or_none()
 
     @staticmethod
-    async def mark_consumed(session: AsyncSession, approval: Approval) -> None:
-        await session.execute(update(Approval).where(Approval.id == approval.id, Approval.consumed_at.is_(None))
+    async def mark_consumed(session: AsyncSession, approval: Approval) -> bool:
+        result = await session.execute(update(Approval).where(Approval.id == approval.id, Approval.consumed_at.is_(None))
                               .values(consumed_at=func.now()))
         await session.commit()
         await session.refresh(approval)
+        return result.rowcount == 1
 
     @staticmethod
     async def expire_for_task(session: AsyncSession, task_id: uuid.UUID, decided_by: str) -> int:
@@ -142,8 +151,15 @@ class ApprovalService:
                 approval = await session.get(Approval, aid)
                 if approval is None or approval.status != "pending":
                     continue
-                await session.execute(update(Approval).where(Approval.id == aid)
-                                      .values(status="expired", decided_at=func.now(), decided_by="system:expiry"))
+                result = await session.execute(
+                    update(Approval).where(Approval.id == aid, Approval.status == "pending")
+                    .values(status="expired", decided_at=func.now(), decided_by="system:expiry")
+                )
+                if result.rowcount == 0:
+                    # Decided by someone else (e.g. an operator's decide()) between
+                    # our re-fetch and this UPDATE: don't overwrite their decision.
+                    await session.rollback()
+                    continue
                 await session.commit()
                 task = await session.get(AgentTask, approval.task_id)
                 if task is not None and task.status == "waiting_approval":
