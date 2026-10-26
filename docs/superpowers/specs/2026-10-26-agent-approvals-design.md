@@ -103,7 +103,7 @@ approval is a no-op.
 
 | Field | Default |
 |---|---|
-| `approval_expiry_hours` | 24 (CHECK 1..168) |
+| `approval_expiry_hours` | 24 (range 1..168 enforced by `ConfigUpdate`, not a DB CHECK) |
 | `approval_whatsapp_enabled` | false |
 | `approval_whatsapp_number` | `+2250700003331` |
 | `approval_whatsapp_server_id` | null → the enabled `McpServer` whose name contains `whatsapp` (case-insensitive) |
@@ -260,7 +260,7 @@ in the UI.
 | GET/PUT | `/api/v1/config` | the six approval fields (`approval_whatsapp_server_id` as UUID or null) |
 
 `AgentCreate`/`AgentUpdate`/`AgentRead` gain `max_auto_risk`.
-`AgentTaskRead` gains `approval: ApprovalRead | null` (the pending one).
+`AgentTaskDetail` gains `approval: ApprovalRead | null` (the pending one); list rows do not carry it.
 SSE protocol unchanged: `waiting_approval` arrives as a `status` event and is
 not final, so the page stays subscribed; `queued`/`running` follow after the
 decision.
