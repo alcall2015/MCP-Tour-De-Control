@@ -210,11 +210,50 @@ class AgentTaskService:
         return True
 
     @staticmethod
+    async def park(session: AsyncSession, task: AgentTask) -> bool:
+        """running -> waiting_approval. The worker slot is freed by the runner returning."""
+        result = await session.execute(
+            update(AgentTask).where(AgentTask.id == task.id, AgentTask.status == "running").values(status="waiting_approval")
+        )
+        if result.rowcount == 0:
+            await session.rollback()
+            await session.refresh(task)
+            log.warning("agent_task_park_skipped", task_id=str(task.id), current=task.status)
+            return False
+        await session.refresh(task)
+        await _notify_event(session, task, None)
+        await session.commit()
+        log.info("agent_task_parked", task_id=str(task.id))
+        return True
+
+    @staticmethod
+    async def resume(session: AsyncSession, task: AgentTask) -> bool:
+        """waiting_approval -> queued; the worker claims it like any queued task."""
+        result = await session.execute(
+            update(AgentTask).where(AgentTask.id == task.id, AgentTask.status == "waiting_approval")
+            .values(status="queued", worker_id=None, heartbeat_at=None)
+        )
+        if result.rowcount == 0:
+            await session.rollback()
+            await session.refresh(task)
+            log.warning("agent_task_resume_skipped", task_id=str(task.id), current=task.status)
+            return False
+        await session.refresh(task)
+        await _notify_event(session, task, None)
+        await _notify(session, QUEUED_CHANNEL, str(task.id))
+        await session.commit()
+        log.info("agent_task_resumed", task_id=str(task.id))
+        return True
+
+    @staticmethod
     async def request_cancel(session: AsyncSession, task: AgentTask) -> None:
         if task.status in FINAL_STATUSES:
             raise TaskConflict(f"Task is already {task.status}")
-        if task.status == "queued":
+        if task.status in ("queued", "waiting_approval"):
             await AgentTaskService.finish(session, task, "cancelled")
+            # Local import: approval_service imports this module.
+            from app.services.approval_service import ApprovalService
+            await ApprovalService.expire_for_task(session, task.id, decided_by="system:cancel")
             return
         task.cancel_requested = True
         await session.commit()
