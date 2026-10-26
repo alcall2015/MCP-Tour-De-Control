@@ -82,8 +82,8 @@ class ApprovalReplies:
         raw = await tool("MessageList", {"sessionId": session_id, "chatId": chat_id, "limit": PAGE}, server)
         oldest = min(a.requested_at for a in pending)
         # Only ids are kept across the loop: `decide()` on an earlier reply can
-        # roll back the session, which expires every ORM instance still held
-        # from `pending` (SQLAlchemy's default expire_on_commit). Touching an
+        # roll back the session, and a rollback expires every ORM instance still
+        # held from `pending` even with expire_on_commit=False. Touching an
         # attribute of one of those expired instances afterwards would try to
         # lazy-load it and raise MissingGreenlet in an async context, so each
         # iteration re-loads its own approval fresh instead.

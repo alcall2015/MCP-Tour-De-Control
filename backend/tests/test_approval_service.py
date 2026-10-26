@@ -221,6 +221,20 @@ async def test_reap_orphaned_waiting_leaves_a_task_with_a_pending_approval_alone
     assert task.status == "waiting_approval"
 
 
+async def test_reap_orphaned_waiting_requeues_a_task_whose_decision_was_never_applied(session):
+    agent, task = await running_task(session)
+    approval = await request(session, task)
+    # Simulate a crash between decide() committing the decision and resume():
+    # the approval is approved and unconsumed while the task still waits.
+    approval.status = "approved"
+    approval.decided_by = "ui"
+    await session.commit()
+    assert await ApprovalService.reap_orphaned_waiting(session) == 1
+    await session.refresh(task)
+    assert task.status == "queued"
+    assert await ApprovalService.reap_orphaned_waiting(session) == 0
+
+
 async def test_list_pending_oldest_first_and_set_notified(session):
     agent, task = await running_task(session)
     approval = await request(session, task)

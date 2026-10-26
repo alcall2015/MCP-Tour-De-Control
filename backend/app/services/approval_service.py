@@ -179,10 +179,9 @@ class ApprovalService:
 
     @staticmethod
     async def reap_orphaned_waiting(session: AsyncSession) -> int:
-        """Fail any `waiting_approval` task whose approval is gone without a
-        trace to resume from (e.g. the process crashed between `decide()`
-        writing the decision and the runner consuming it, or between `park()`
-        and `request()` committing the approval row in some earlier bug)."""
+        """Recover `waiting_approval` tasks left behind by a crash between two
+        commits: one whose decision was recorded but never queued is resumed;
+        one with no pending and no decided approval at all is failed."""
         task_ids = (await session.execute(
             select(AgentTask.id).where(AgentTask.status == "waiting_approval")
         )).scalars().all()
@@ -198,6 +197,10 @@ class ApprovalService:
                 if pending is not None:
                     continue
                 if await ApprovalService.decided_unconsumed(session, tid) is not None:
+                    # decide() committed the decision but crashed before resume().
+                    if await AgentTaskService.resume(session, task):
+                        log.warning("approval_decided_task_requeued", task_id=str(tid))
+                        count += 1
                     continue
                 await AgentTaskService.record_step(session, task, "error", {"message": "approval lost", "phase": "approval"})
                 if await AgentTaskService.finish(session, task, "failed", error="approval lost"):
