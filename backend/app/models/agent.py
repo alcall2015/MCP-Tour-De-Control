@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, String, Table, Text
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, SmallInteger, String, Table, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,7 +29,7 @@ class Agent(Base):
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
     cron_expr: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Tools at or below this risk level run without approval; 3 is never automatic.
-    max_auto_risk: Mapped[int] = mapped_column(Integer, default=1)
+    max_auto_risk: Mapped[int] = mapped_column(SmallInteger, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
