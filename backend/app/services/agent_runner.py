@@ -16,10 +16,13 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import async_session
-from app.models import Agent, AgentTask, Config
+from app.models import Agent, AgentTask, AgentTaskStep, Approval, Config
 from app.models.agent_task import OPEN_STATUSES
+from app.models.tool_policy import DEFAULT_RISK_LEVEL
 from app.services.agent_task_service import AgentTaskService
+from app.services.approval_service import ApprovalConflict, ApprovalService
 from app.services.llm_runtime import LlmResult, build_tool_defs, call_llm, call_mcp_tool
+from app.services.tool_policy_service import ToolPolicyService
 from app.utils.crypto import decrypt_value
 
 log = structlog.get_logger()
@@ -41,6 +44,13 @@ class RunFailed(Exception):
 
 class Cancelled(Exception):
     pass
+
+
+class Parked(Exception):
+    """The task is waiting for an operator decision; the runner exits without finishing it."""
+    def __init__(self, approval):
+        super().__init__(approval.code)
+        self.approval = approval
 
 
 SYSTEM_PROMPT = """You are an autonomous agent running inside MCP Tour De Control.
@@ -129,11 +139,14 @@ def _validate_report(report: dict) -> dict:
 
 
 class _Run:
-    def __init__(self, task_id, llm, tool, tool_defs, session_factory, clock):
-        self.task_id, self.llm, self.tool, self.tool_defs, self.sf, self.clock = task_id, llm, tool, tool_defs, session_factory, clock
+    def __init__(self, task_id, llm, tool, tool_defs, policy_levels, session_factory, clock):
+        self.task_id, self.llm, self.tool, self.tool_defs, self.policy_levels, self.sf, self.clock = (
+            task_id, llm, tool, tool_defs, policy_levels, session_factory, clock)
         self.messages: list[dict] = []
         self.tools: list[dict] = []
         self.server_map = {}
+        self.levels: dict[str, int] = {}
+        self.ceiling = 1
         self.limit_hit: LimitHit | None = None
 
     async def _task(self, session) -> AgentTask:
@@ -164,6 +177,34 @@ class _Run:
             return False
         return True
 
+    async def _execute_call(self, session, task, turn_seq: int, i: int, tc: dict, *, approval=None):
+        server = self.server_map.get(tc["name"])
+        level = self.levels.get(tc["name"], DEFAULT_RISK_LEVEL)
+        t1 = self.clock()
+        payload = {"tool": tc["name"], "server": server.name if server else None, "args": tc["args"], "risk_level": level}
+        if server is None:
+            text, ok = json.dumps({"error": f"Unknown tool: {tc['name']}"}), False
+        elif approval is not None and approval.status == "rejected":
+            text, ok = json.dumps({"error": f"rejected by operator: {approval.decision_reason or 'no reason given'}"}), False
+        elif approval is None and level > self.ceiling:
+            created = await ApprovalService.request(session, task, step_seq=turn_seq, call_index=i, tool_name=tc["name"],
+                                                     server_name=server.name, args=tc["args"], risk_level=level)
+            raise Parked(created)
+        else:
+            args = approval.args if approval is not None else tc["args"]
+            text = await self.tool(tc["name"], args, server)
+            ok = not _looks_like_error(text)
+            payload["args"] = args
+        if approval is not None:
+            payload["approval_id"] = str(approval.id)
+        await AgentTaskService.record_step(session, task, "tool_call", {**payload, "result": text, "ok": ok},
+                                           duration_ms=int((self.clock() - t1) * 1000))
+        if approval is not None:
+            consumed = await ApprovalService.mark_consumed(session, approval)
+            if not consumed:
+                log.warning("approval_already_consumed", approval_id=str(approval.id), task_id=str(task.id))
+        self.messages.append({"role": "tool", "tool_call_id": f"call_{turn_seq}_{i}", "content": text})
+
     async def run(self):
         async with self.sf() as session:
             task = await self._task(session)
@@ -174,8 +215,18 @@ class _Run:
             self.provider, self.model, self.api_key = config.llm_provider, config.llm_model, decrypt_value(config.api_key)
             servers = [s for s in agent.mcp_servers if s.enabled]
             self.tools, self.server_map = await self.tool_defs(servers)
+            self.levels = await self.policy_levels(session, self.server_map)
+            self.ceiling = agent.max_auto_risk
             self.started = self.clock()
             self.deadline = self.started + task.timeout_seconds
+
+            decided = await ApprovalService.decided_unconsumed(session, task.id)
+            if decided is not None:
+                await self._resume(session, task, decided)
+                return
+            if task.step_count > 0:
+                raise RunFailed("resume", "task has steps but no decided approval to resume from")
+
             self.messages = [{"role": "system", "content": SYSTEM_PROMPT.format(objective=task.objective, instructions=task.instructions or "(none)")}]
 
             # Phase 1: plan
@@ -187,45 +238,52 @@ class _Run:
 
             # Phase 2: tool loop
             self.messages.append({"role": "user", "content": EXECUTE_PROMPT + "\nPlan:\n" + json.dumps(plan)})
-            rounds = 0
-            while True:
-                if rounds >= task.max_steps:
-                    self.limit_hit = LimitHit.MAX_STEPS
-                    break
-                await AgentTaskService.heartbeat(session, task.id)
-                if not await self._check_cancel_and_deadline(session):
-                    break
-                rounds += 1
-                t0 = self.clock()
-                prompt_snapshot = json.loads(json.dumps(self.messages))
-                result = await self.llm(self.provider, self.model, self.api_key, self.messages, self.tools)
-                await AgentTaskService.record_step(session, task, "turn", {"text": result.text or None, "tool_calls": result.tool_calls},
-                                                   prompt=prompt_snapshot, tokens_in=result.tokens_in, tokens_out=result.tokens_out,
-                                                   duration_ms=int((self.clock() - t0) * 1000))
-                if not result.tool_calls:
-                    if result.text:
-                        self.messages.append({"role": "assistant", "content": result.text})
-                    break
-                turn_seq = task.step_count  # seq of the turn step just written; ids must match between the two messages
-                self.messages.append({"role": "assistant", "content": result.text or None, "tool_calls": [
-                    {"id": f"call_{turn_seq}_{i}", "type": "function",
-                     "function": {"name": tc["name"], "arguments": json.dumps(tc["args"])}}
-                    for i, tc in enumerate(result.tool_calls)]})
-                for i, tc in enumerate(result.tool_calls):
-                    server = self.server_map.get(tc["name"])
-                    t1 = self.clock()
-                    if server is None:
-                        text, ok = json.dumps({"error": f"Unknown tool: {tc['name']}"}), False
-                    else:
-                        text = await self.tool(tc["name"], tc["args"], server)
-                        ok = not _looks_like_error(text)
-                    await AgentTaskService.record_step(session, task, "tool_call",
-                                                       {"tool": tc["name"], "server": server.name if server else None, "args": tc["args"], "result": text, "ok": ok},
-                                                       duration_ms=int((self.clock() - t1) * 1000))
-                    self.messages.append({"role": "tool", "tool_call_id": f"call_{turn_seq}_{i}", "content": text})
-
+            await self._loop(session, task, rounds=0)
             # Phases 3-4 run even after a limit, within a fixed grace.
             await self._finalize(session, task, plan)
+
+    async def _loop(self, session, task, *, rounds: int):
+        """The tool loop, from the given number of rounds already used."""
+        while True:
+            if rounds >= task.max_steps:
+                self.limit_hit = LimitHit.MAX_STEPS
+                break
+            await AgentTaskService.heartbeat(session, task.id)
+            if not await self._check_cancel_and_deadline(session):
+                break
+            rounds += 1
+            t0 = self.clock()
+            prompt_snapshot = json.loads(json.dumps(self.messages))
+            result = await self.llm(self.provider, self.model, self.api_key, self.messages, self.tools)
+            await AgentTaskService.record_step(session, task, "turn", {"text": result.text or None, "tool_calls": result.tool_calls},
+                                               prompt=prompt_snapshot, tokens_in=result.tokens_in, tokens_out=result.tokens_out,
+                                               duration_ms=int((self.clock() - t0) * 1000))
+            if not result.tool_calls:
+                if result.text:
+                    self.messages.append({"role": "assistant", "content": result.text})
+                break
+            turn_seq = task.step_count  # seq of the turn step just written; ids must match between the two messages
+            self.messages.append({"role": "assistant", "content": result.text or None, "tool_calls": [
+                {"id": f"call_{turn_seq}_{i}", "type": "function",
+                 "function": {"name": tc["name"], "arguments": json.dumps(tc["args"])}}
+                for i, tc in enumerate(result.tool_calls)]})
+            for i, tc in enumerate(result.tool_calls):
+                await self._execute_call(session, task, turn_seq, i, tc)
+
+    async def _resume(self, session, task, approval):
+        """Continue after an operator decision: rebuild the history from the journal, no LLM call."""
+        steps = (await session.execute(select(AgentTaskStep).where(AgentTaskStep.task_id == task.id).order_by(AgentTaskStep.seq))).scalars().all()
+        self.messages, turn_seq, rounds, tool_calls = _rebuild_history(steps)
+        plan = task.plan
+        if plan is None or turn_seq is None or approval.call_index >= len(tool_calls):
+            raise RunFailed("resume", "journal has no plan or no turn to resume from")
+        await AgentTaskService.heartbeat(session, task.id)
+        # Apply the decision to its call, then re-gate the rest of that turn.
+        await self._execute_call(session, task, turn_seq, approval.call_index, tool_calls[approval.call_index], approval=approval)
+        for i in range(approval.call_index + 1, len(tool_calls)):
+            await self._execute_call(session, task, turn_seq, i, tool_calls[i])
+        await self._loop(session, task, rounds=rounds)
+        await self._finalize(session, task, plan)
 
     async def _finalize(self, session, task, plan):
         grace_deadline = self.deadline + settings.AGENT_TASK_FINAL_GRACE_SECONDS
@@ -272,6 +330,26 @@ class _Run:
         await AgentTaskService.finish(session, task, "completed", outcome=derive_outcome(critique["criteria"]))
 
 
+def _rebuild_history(steps) -> tuple[list[dict], int | None, int, list[dict]]:
+    """Messages as the model last saw them, the seq of the last turn, the number of turns so far, and that turn's tool calls."""
+    turns = [s for s in steps if s.kind == "turn"]
+    if not turns:
+        return [], None, 0, []
+    last = turns[-1]
+    messages = json.loads(json.dumps(last.prompt or []))
+    tool_calls = list(last.payload.get("tool_calls") or [])
+    messages.append({"role": "assistant", "content": last.payload.get("text"), "tool_calls": [
+        {"id": f"call_{last.seq}_{i}", "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc["args"])}}
+        for i, tc in enumerate(tool_calls)]})
+    # Tool results recorded after that turn, in execution order: calls run
+    # in index order and the gated one is always the first not yet recorded,
+    # so the i-th recorded result belongs to call i.
+    recorded = [s for s in steps if s.kind == "tool_call" and s.seq > last.seq]
+    for i, s in enumerate(recorded):
+        messages.append({"role": "tool", "tool_call_id": f"call_{last.seq}_{i}", "content": s.payload.get("result", "")})
+    return messages, last.seq, len(turns), tool_calls
+
+
 def _looks_like_error(text: str) -> bool:
     try:
         data = json.loads(text)
@@ -281,10 +359,23 @@ def _looks_like_error(text: str) -> bool:
 
 
 async def run_task(task_id: uuid.UUID, *, llm=call_llm, tool=call_mcp_tool, tool_defs=build_tool_defs,
+                   policy_levels=ToolPolicyService.levels_for, notify=None,
                    session_factory=async_session, clock=time.monotonic) -> None:
-    run = _Run(task_id, llm, tool, tool_defs, session_factory, clock)
+    run = _Run(task_id, llm, tool, tool_defs, policy_levels, session_factory, clock)
     try:
         await run.run()
+    except Parked as parked:
+        if notify is not None:
+            try:
+                async with session_factory() as session:
+                    await notify(session, parked.approval)
+            except Exception as exc:  # noqa: BLE001 - notification never decides the task's fate
+                log.warning("approval_notify_failed", approval_id=str(parked.approval.id), error=str(exc))
+        return
+    except ApprovalConflict:
+        # The task went final (e.g. cancelled) right as we tried to park it;
+        # ApprovalService already expired the approval. Nothing left to do.
+        return
     except Cancelled:
         async with session_factory() as session:
             task = await session.get(AgentTask, task_id)

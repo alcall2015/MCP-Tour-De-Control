@@ -28,7 +28,7 @@ async def setup(session, *, max_steps=5, timeout=60, server_enabled=True, with_k
     session.add(Config(llm_provider="openai", llm_model="gpt-x", api_key=encrypt_value("sk-live-SENTINEL-DO-NOT-LEAK") if with_key else None))
     server = McpServer(name="srv", transport="http", url="http://x", enabled=server_enabled)
     agent = Agent(name="a", objective="Inspect x", instructions="Be terse", status="active",
-                  max_steps=max_steps, timeout_seconds=timeout, mcp_servers=[server])
+                  max_steps=max_steps, timeout_seconds=timeout, max_auto_risk=2, mcp_servers=[server])
     session.add(agent)
     await session.commit()
     await session.refresh(agent)
