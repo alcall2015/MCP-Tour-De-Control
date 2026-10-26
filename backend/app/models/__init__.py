@@ -11,5 +11,7 @@ from app.models.document import TrackedDocument, DocumentContent, DocumentActivi
 from app.models.sms_reply import SmsReply
 from app.models.agent import Agent
 from app.models.agent_task import AgentTask, AgentTaskStep
+from app.models.tool_policy import ToolPolicy
+from app.models.approval import Approval
 
-__all__ = ["Base", "Config", "McpServer", "Prompt", "Script", "Execution", "StressTest", "StressTestMetrics", "Conversation", "ChatMessage", "SimPairingGroup", "SimPairingTopic", "SimPairingSim", "SimPair", "SimPairHistory", "SimPairMessage", "SimPairMessageQueue", "SimPairCall", "SimPairingRun", "TrackedDocument", "DocumentContent", "DocumentActivity", "SmsReply", "Agent", "AgentTask", "AgentTaskStep"]
+__all__ = ["Base", "Config", "McpServer", "Prompt", "Script", "Execution", "StressTest", "StressTestMetrics", "Conversation", "ChatMessage", "SimPairingGroup", "SimPairingTopic", "SimPairingSim", "SimPair", "SimPairHistory", "SimPairMessage", "SimPairMessageQueue", "SimPairCall", "SimPairingRun", "TrackedDocument", "DocumentContent", "DocumentActivity", "SmsReply", "Agent", "AgentTask", "AgentTaskStep", "ToolPolicy", "Approval"]

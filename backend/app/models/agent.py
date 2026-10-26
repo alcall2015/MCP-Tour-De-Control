@@ -28,6 +28,8 @@ class Agent(Base):
     max_steps: Mapped[int] = mapped_column(Integer, default=20)
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
     cron_expr: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Tools at or below this risk level run without approval; 3 is never automatic.
+    max_auto_risk: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -42,4 +44,5 @@ class Agent(Base):
         CheckConstraint("status IN ('draft','active','paused','archived')", name="ck_agent_status"),
         CheckConstraint("max_steps BETWEEN 1 AND 100", name="ck_agent_max_steps"),
         CheckConstraint("timeout_seconds BETWEEN 10 AND 3600", name="ck_agent_timeout_seconds"),
+        CheckConstraint("max_auto_risk BETWEEN 0 AND 2", name="ck_agent_max_auto_risk"),
     )

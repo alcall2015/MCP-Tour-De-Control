@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     LLM_CALL_TIMEOUT_SECONDS: int = 120
     MCP_TOOL_TIMEOUT_SECONDS: int = 120
 
+    # Used to build the task links put in WhatsApp approval notifications.
+    PUBLIC_BASE_URL: str = "https://tour.alcall.net"
+
     model_config = {"env_file": ".env"}
 
 

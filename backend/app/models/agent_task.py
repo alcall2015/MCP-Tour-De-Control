@@ -7,14 +7,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.config import Base
 
-TASK_STATUSES = ("queued", "running", "completed", "failed", "cancelled")
+TASK_STATUSES = ("queued", "running", "waiting_approval", "completed", "failed", "cancelled")
 FINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
-# "Open" is defined as "not final", so a future state (waiting_approval) is
-# covered by the partial unique index without a migration.
-OPEN_STATUSES = ("queued", "running")
+# "Open" is defined as "not final", so adding an open state (like
+# waiting_approval) never needs a migration to stay covered by the partial
+# unique index below.
+OPEN_STATUSES = ("queued", "running", "waiting_approval")
 OUTCOMES = ("success", "partial", "failed")
 TRIGGERS = ("manual", "cron")
-STEP_KINDS = ("plan", "turn", "tool_call", "critique", "report", "error")
+STEP_KINDS = ("plan", "turn", "tool_call", "critique", "report", "error", "approval_requested")
 
 
 def _now() -> datetime:
@@ -55,7 +56,7 @@ class AgentTask(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("status IN ('queued','running','completed','failed','cancelled')", name="ck_agent_task_status"),
+        CheckConstraint("status IN ('queued','running','waiting_approval','completed','failed','cancelled')", name="ck_agent_task_status"),
         CheckConstraint("outcome IS NULL OR outcome IN ('success','partial','failed')", name="ck_agent_task_outcome"),
         CheckConstraint("trigger IN ('manual','cron')", name="ck_agent_task_trigger"),
         Index("ix_agent_task_agent_created", "agent_id", text("created_at DESC")),
@@ -86,5 +87,5 @@ class AgentTaskStep(Base):
 
     __table_args__ = (
         UniqueConstraint("task_id", "seq", name="uq_agent_task_step_seq"),
-        CheckConstraint("kind IN ('plan','turn','tool_call','critique','report','error')", name="ck_agent_task_step_kind"),
+        CheckConstraint("kind IN ('plan','turn','tool_call','critique','report','error','approval_requested')", name="ck_agent_task_step_kind"),
     )

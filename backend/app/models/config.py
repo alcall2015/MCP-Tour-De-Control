@@ -59,6 +59,22 @@ class Config(Base):
     pairing_call_min_seconds: Mapped[int] = mapped_column(Integer, default=45)
     pairing_call_max_seconds: Mapped[int] = mapped_column(Integer, default=75)
     pairing_call_max_per_run: Mapped[int] = mapped_column(Integer, default=5)
+    # Agent approvals
+    approval_expiry_hours: Mapped[int] = mapped_column(Integer, default=24)
+    approval_whatsapp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    approval_whatsapp_number: Mapped[str] = mapped_column(String(32), default="+2250700003331")
+    approval_whatsapp_server_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    approval_whatsapp_session_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    approval_whatsapp_template: Mapped[str] = mapped_column(
+        Text,
+        default=(
+            "Approbation requise · {agent}\n"
+            "{tool} sur {server}\n"
+            "{args}\n"
+            "Répondre OUI {code} ou NON {code}\n"
+            "Expire à {expires} · {link}"
+        ),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
