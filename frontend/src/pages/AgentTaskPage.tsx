@@ -5,6 +5,7 @@ import { Spinner } from "../components/ui/Spinner";
 import { MutationError } from "../components/ui/MutationError";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 import { useAgentTaskStream } from "../components/Agents/useAgentTaskStream";
+import { ApprovalCard } from "../components/Agents/ApprovalCard";
 import { OutcomeBadge, TaskStatusBadge } from "../components/Agents/AgentTaskBadges";
 import { formatDuration } from "../components/Agents/time";
 import { TaskPlan } from "../components/Agents/TaskPlan";
@@ -76,9 +77,14 @@ export function AgentTaskPage() {
         )}
       </div>
 
-      <p className="text-xs rounded-lg px-3 py-2" style={{ color: "var(--warning)", backgroundColor: "rgba(251, 191, 36, 0.08)", border: "1px solid rgba(251, 191, 36, 0.25)" }}>
-        No approval step yet: every authorised tool runs immediately.
-      </p>
+      {task.status === "waiting_approval" && task.approval && (
+        <ErrorBoundary><ApprovalCard approval={task.approval} taskId={taskId} /></ErrorBoundary>
+      )}
+      {task.status === "waiting_approval" && !task.approval && (
+        <p className="text-xs rounded-lg px-3 py-2" style={{ color: "var(--warning)", backgroundColor: "rgba(251, 191, 36, 0.08)", border: "1px solid rgba(251, 191, 36, 0.25)" }}>
+          Waiting for an approval that is no longer pending. It may have been decided elsewhere or expired; the task will move on or fail within a minute.
+        </p>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ErrorBoundary><TaskPlan plan={task.plan} /></ErrorBoundary>

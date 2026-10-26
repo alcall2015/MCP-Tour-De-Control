@@ -43,6 +43,8 @@ export function useAgentTaskStream(taskId: string) {
       } else if (e.event === "status") {
         setLiveStatus(e.data.status);
         setLiveMeta({ outcome: e.data.outcome, error: e.data.error, finished_at: e.data.finished_at });
+        // `approval` lives on the detail, not on the stream: a park or a decision changes it, so refresh the base once per status change.
+        queryClient.invalidateQueries({ queryKey: ["agent-task", taskId] });
       } else if (e.event === "done") {
         sawDone = true;
         setLive(false);
