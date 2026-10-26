@@ -1,7 +1,11 @@
 """Risk levels of MCP tools. Discovery only ever adds rows at the default
 level or refreshes descriptions; levels change only through set_level."""
+import uuid
+from datetime import datetime, timezone
+
 import structlog
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import McpServer, ToolPolicy
@@ -22,18 +26,40 @@ class ToolPolicyService:
 
     @staticmethod
     async def sync(session: AsyncSession, server: McpServer, tools: list[dict]) -> None:
+        """Insert any (server, tool) rows discovery hasn't seen yet and refresh descriptions on
+        existing ones. Missing rows go through `INSERT ... ON CONFLICT DO NOTHING` rather than a
+        plain `session.add` so two concurrent syncs of the same server (a manual test racing a
+        tool listing, or two `levels_for` calls) can't both try to insert the same (server, tool)
+        and raise an IntegrityError — the loser's insert is silently skipped and a fresh row
+        already exists under the unique constraint. Existing rows keep the description-refresh
+        path as is; risk_level is never touched here."""
         existing = {p.tool_name: p for p in (await session.execute(
             select(ToolPolicy).where(ToolPolicy.mcp_server_id == server.id))).scalars().all()}
+        new_rows: dict[str, dict] = {}
         for t in tools:
-            name = t.get("name") if isinstance(t, dict) else getattr(t, "name", None)
+            name = t.get("name")
             if not name:
                 continue
-            description = t.get("description") if isinstance(t, dict) else getattr(t, "description", None)
+            description = t.get("description")
             row = existing.get(name)
-            if row is None:
-                session.add(ToolPolicy(mcp_server_id=server.id, tool_name=name, description=description))
-            elif description is not None and row.description != description:
-                row.description = description
+            if row is not None:
+                if description is not None and row.description != description:
+                    row.description = description
+            elif name not in new_rows:
+                now = datetime.now(timezone.utc)
+                new_rows[name] = {
+                    "id": uuid.uuid4(),
+                    "mcp_server_id": server.id,
+                    "tool_name": name,
+                    "risk_level": DEFAULT_RISK_LEVEL,
+                    "description": description,
+                    "first_seen_at": now,
+                    "updated_at": now,
+                }
+        if new_rows:
+            stmt = pg_insert(ToolPolicy).values(list(new_rows.values())).on_conflict_do_nothing(
+                constraint="uq_tool_policy_server_tool")
+            await session.execute(stmt)
         await session.commit()
 
     @staticmethod
