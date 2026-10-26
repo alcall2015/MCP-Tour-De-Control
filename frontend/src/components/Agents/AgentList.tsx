@@ -44,6 +44,7 @@ export function AgentList({ view, onEdit, onCreate }: Props) {
       setBusyId(null);
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       queryClient.invalidateQueries({ queryKey: ["agent-tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
     }
   };
 

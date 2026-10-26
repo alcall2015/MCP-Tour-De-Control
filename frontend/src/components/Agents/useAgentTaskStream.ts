@@ -11,14 +11,23 @@ import type { AgentTaskDetail, AgentTaskStep } from "../../lib/api";
  */
 export function useAgentTaskStream(taskId: string) {
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ["agent-task", taskId], queryFn: () => getAgentTask(taskId) });
+  const [live, setLive] = useState(false);
+  // While not streaming live and the last known status isn't final, poll so a parked/lost-connection page converges without a reload.
+  const query = useQuery({
+    queryKey: ["agent-task", taskId],
+    queryFn: () => getAgentTask(taskId),
+    refetchInterval: (q) => {
+      if (live) return false;
+      const status = q.state.data?.status;
+      return status && FINAL_TASK_STATUSES.has(status) ? false : 15000;
+    },
+  });
   // Bound once per observer by TanStack Query, so it is a stable effect dependency.
   const { refetch } = query;
   const [liveSteps, setLiveSteps] = useState<AgentTaskStep[]>([]);
   const [liveStatus, setLiveStatus] = useState<AgentTaskDetail["status"] | "gone" | null>(null);
   const [liveMeta, setLiveMeta] = useState<{ outcome: AgentTaskDetail["outcome"]; error: string | null; finished_at: string | null } | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [live, setLive] = useState(false);
 
   const initialStatus = query.data?.status;
   const shouldStream = Boolean(initialStatus) && !FINAL_TASK_STATUSES.has(initialStatus as string);

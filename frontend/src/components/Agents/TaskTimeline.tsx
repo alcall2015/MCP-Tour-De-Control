@@ -54,7 +54,7 @@ function ApprovalRequestedBody({ payload }: { payload: Record<string, unknown> }
         {typeof payload.risk_level === "number" && <RiskBadge level={payload.risk_level} compact />}
         {typeof payload.code === "string" && <span className="ml-auto font-mono" style={{ color: "var(--text-secondary)" }}>code {payload.code}</span>}
       </div>
-      <pre className="overflow-x-auto whitespace-pre-wrap font-mono" style={{ color: "var(--text-secondary)" }}>{pretty(payload.args ?? {})}</pre>
+      <pre className="overflow-x-auto whitespace-pre-wrap font-mono max-h-64 overflow-y-auto" style={{ color: "var(--text-secondary)" }}>{pretty(payload.args ?? {})}</pre>
     </div>
   );
 }

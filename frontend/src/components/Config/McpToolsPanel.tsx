@@ -55,7 +55,7 @@ export function McpToolsPanel({ serverId, serverName }: { serverId: string; serv
       {visible.length > 0 && (
         <ul className="divide-y" style={{ borderColor: "var(--border)" }}>
           {visible.map((t) => (
-            <li key={t.name} className="flex items-center gap-3 py-2 text-xs">
+            <li key={t.name} className="flex flex-wrap items-center gap-3 py-2 text-xs">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <code className="font-mono truncate" style={{ color: "var(--text-primary)" }}>{t.name}</code>
@@ -64,8 +64,8 @@ export function McpToolsPanel({ serverId, serverName }: { serverId: string; serv
                 {t.description && <p className="mt-0.5 line-clamp-2" style={{ color: "var(--text-muted)" }}>{t.description}</p>}
               </div>
               <select
-                className="input-field flex-shrink-0"
-                style={{ width: "15rem", padding: "0.3rem 0.5rem", fontSize: "0.75rem" }}
+                className="input-field flex-shrink-0 w-full sm:w-[15rem]"
+                style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem" }}
                 value={t.risk_level}
                 disabled={pendingName === t.name}
                 aria-label={`Risk level of ${t.name}`}

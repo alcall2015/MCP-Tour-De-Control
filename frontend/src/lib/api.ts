@@ -1,5 +1,24 @@
 const BASE = "/api/v1";
 
+/** FastAPI/Pydantic validation errors send `detail` as a list of `{loc, msg, type}` objects; render those readably instead of stringifying the object. */
+function formatErrorDetail(detail: unknown, statusText: string): string {
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (item && typeof item === "object" && "msg" in item) {
+          const loc = (item as { loc?: unknown[] }).loc;
+          const field = Array.isArray(loc) && loc.length > 0 ? String(loc[loc.length - 1]) : null;
+          const msg = String((item as { msg: unknown }).msg);
+          return field ? `${field}: ${msg}` : msg;
+        }
+        return String(item);
+      })
+      .join("; ");
+  }
+  if (typeof detail === "string" && detail) return detail;
+  return statusText;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -7,7 +26,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(error.detail || res.statusText);
+    throw new Error(formatErrorDetail(error.detail, res.statusText));
   }
   if (res.status === 204) return undefined as T;
   return res.json();

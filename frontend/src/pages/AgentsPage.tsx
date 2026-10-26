@@ -3,6 +3,7 @@ import type { Agent } from "../lib/api";
 import { AgentList } from "../components/Agents/AgentList";
 import { AgentFormModal } from "../components/Agents/AgentFormModal";
 import { PendingApprovalsStrip } from "../components/Agents/PendingApprovalsStrip";
+import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 
 export function AgentsPage() {
   const [view, setView] = useState<"active" | "archived">("active");
@@ -31,7 +32,7 @@ export function AgentsPage() {
         <button type="button" onClick={openCreate} className="btn-primary">+ New Agent</button>
       </div>
 
-      <PendingApprovalsStrip />
+      <ErrorBoundary><PendingApprovalsStrip /></ErrorBoundary>
 
       <div className="flex gap-2">
         {tab("active", "Active")}
