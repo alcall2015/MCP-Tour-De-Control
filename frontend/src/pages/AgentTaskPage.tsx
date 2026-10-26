@@ -16,7 +16,7 @@ import { TaskReport } from "../components/Agents/TaskReport";
 export function AgentTaskPage() {
   const { agentId = "", taskId = "" } = useParams();
   const queryClient = useQueryClient();
-  const { task, steps, gone, live, streamError, isLoading, error } = useAgentTaskStream(taskId);
+  const { task, steps, gone, live, streamError, isLoading, isFetching, error } = useAgentTaskStream(taskId);
   // Fetched by id, not filtered out of the list: an archived agent's task page must still name its agent.
   const { data: agent } = useQuery({ queryKey: ["agent", agentId], queryFn: () => getAgent(agentId), enabled: Boolean(agentId) });
 
@@ -78,9 +78,9 @@ export function AgentTaskPage() {
       </div>
 
       {task.status === "waiting_approval" && task.approval && (
-        <ErrorBoundary><ApprovalCard approval={task.approval} taskId={taskId} /></ErrorBoundary>
+        <ErrorBoundary><ApprovalCard key={task.approval.id} approval={task.approval} taskId={taskId} /></ErrorBoundary>
       )}
-      {task.status === "waiting_approval" && !task.approval && (
+      {task.status === "waiting_approval" && !task.approval && !isFetching && (
         <p className="text-xs rounded-lg px-3 py-2" style={{ color: "var(--warning)", backgroundColor: "rgba(251, 191, 36, 0.08)", border: "1px solid rgba(251, 191, 36, 0.25)" }}>
           Waiting for an approval that is no longer pending. It may have been decided elsewhere or expired; the task will move on or fail within a minute.
         </p>

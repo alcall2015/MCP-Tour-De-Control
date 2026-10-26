@@ -86,6 +86,8 @@ export function useAgentTaskStream(taskId: string) {
     live,
     streamError,
     isLoading: query.isLoading,
+    // True while the detail is being refetched after a status change: callers avoid judging `approval` on a stale base.
+    isFetching: query.isFetching,
     error: query.error,
     refetch,
   };
