@@ -81,7 +81,13 @@ class ApprovalReplies:
         decided_by = "whatsapp:" + re.sub(r"\D", "", config.approval_whatsapp_number)
         raw = await tool("MessageList", {"sessionId": session_id, "chatId": chat_id, "limit": PAGE}, server)
         oldest = min(a.requested_at for a in pending)
-        by_code = {a.code: a for a in pending}
+        # Only ids are kept across the loop: `decide()` on an earlier reply can
+        # roll back the session, which expires every ORM instance still held
+        # from `pending` (SQLAlchemy's default expire_on_commit). Touching an
+        # attribute of one of those expired instances afterwards would try to
+        # lazy-load it and raise MissingGreenlet in an async context, so each
+        # iteration re-loads its own approval fresh instead.
+        by_code = {a.code: a.id for a in pending}
         decided = 0
         for msg in extract_messages(raw):
             if msg["from_me"] or (msg["timestamp"] is not None and msg["timestamp"] < oldest):
@@ -90,8 +96,12 @@ class ApprovalReplies:
             if not parsed:
                 continue
             approve, code = parsed
-            approval = by_code.get(code)
-            if approval is None:
+            approval_id = by_code.get(code)
+            if approval_id is None:
+                continue
+            approval = await session.get(Approval, approval_id)
+            if approval is None or approval.status != "pending":
+                by_code.pop(code, None)
                 continue
             try:
                 await ApprovalService.decide(session, approval, approve=approve, decided_by=decided_by,

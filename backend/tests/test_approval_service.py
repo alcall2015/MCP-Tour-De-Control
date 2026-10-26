@@ -97,6 +97,7 @@ async def test_approve_resumes_and_is_single_shot(session):
     task_id = task.id  # captured before decide()'s conflict-branch rollback expires `task`
     with pytest.raises(ApprovalConflict):
         await ApprovalService.decide(session, approval, approve=False, decided_by="ui", reason="late")
+    assert not session.in_transaction()
     pending = await ApprovalService.decided_unconsumed(session, task_id)
     assert pending is not None and pending.id == approval.id
     assert await ApprovalService.mark_consumed(session, approval) is True
@@ -134,15 +135,27 @@ async def test_cancel_waiting_task_expires_its_approval(session):
         await AgentTaskService.request_cancel(session, task)
 
 
-async def test_decide_after_cancel_changes_nothing_on_the_task(session):
-    # request_cancel is what normally expires the approval; here the task was
-    # finished directly so the approval is still pending while the task is final.
+async def test_finish_failed_directly_expires_its_pending_approval(session):
+    agent, task = await running_task(session)
+    approval = await request(session, task)
+    await AgentTaskService.finish(session, task, "failed", error="boom")
+    await session.refresh(task)
+    await session.refresh(approval)
+    assert task.status == "failed" and approval.status == "expired" and approval.decided_by == "system:cancel"
+
+
+async def test_decide_after_a_direct_finish_raises_since_finish_already_expired_it(session):
+    # finish() itself expires any pending approval for the task it finishes
+    # (see test_finish_failed_directly_expires_its_pending_approval), so a
+    # decide() that arrives after a direct finish now always hits an
+    # already-decided approval instead of quietly resuming a final task.
     agent, task = await running_task(session)
     approval = await request(session, task)
     await AgentTaskService.finish(session, task, "cancelled")
-    decided = await ApprovalService.decide(session, approval, approve=True, decided_by="ui", reason=None)
+    with pytest.raises(ApprovalConflict):
+        await ApprovalService.decide(session, approval, approve=True, decided_by="ui", reason=None)
     await session.refresh(task)
-    assert decided.status == "approved" and task.status == "cancelled"
+    assert task.status == "cancelled"
 
 
 async def test_expire_due_fails_the_task(session):
@@ -183,6 +196,29 @@ async def test_request_when_task_no_longer_running_expires_the_approval_and_rais
         select(Approval).where(Approval.task_id == task.id)
     )).scalars().first()
     assert approval is None or approval.status == "expired"
+
+
+async def test_reap_orphaned_waiting_fails_a_task_whose_approval_has_no_pending_or_decided_row(session):
+    agent, task = await running_task(session)
+    approval = await request(session, task)
+    # Simulate the crash window: the approval is gone from `pending` (here,
+    # expired directly on the row) without the runner ever consuming a
+    # decision for it.
+    approval.status = "expired"
+    await session.commit()
+    assert await ApprovalService.reap_orphaned_waiting(session) == 1
+    await session.refresh(task)
+    assert task.status == "failed" and task.error == "approval lost"
+    steps = (await session.execute(select(AgentTaskStep).where(AgentTaskStep.task_id == task.id).order_by(AgentTaskStep.seq))).scalars().all()
+    assert steps[-1].kind == "error" and steps[-1].payload["message"] == "approval lost"
+
+
+async def test_reap_orphaned_waiting_leaves_a_task_with_a_pending_approval_alone(session):
+    agent, task = await running_task(session)
+    await request(session, task)
+    assert await ApprovalService.reap_orphaned_waiting(session) == 0
+    await session.refresh(task)
+    assert task.status == "waiting_approval"
 
 
 async def test_list_pending_oldest_first_and_set_notified(session):

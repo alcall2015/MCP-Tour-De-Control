@@ -120,8 +120,11 @@ async def _execute_approval_expiry():
     try:
         async with async_session() as session:
             expired = await ApprovalService.expire_due(session)
+            reaped = await ApprovalService.reap_orphaned_waiting(session)
         if expired:
             log.info("approvals_expired", count=expired)
+        if reaped:
+            log.info("approvals_reaped", count=reaped)
     except Exception as exc:
         log.error("Approval expiry failed", error=str(exc))
 

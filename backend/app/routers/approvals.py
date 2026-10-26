@@ -1,5 +1,4 @@
 import uuid
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -8,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_async_session
 from app.models import Agent, AgentTask, Approval
 from app.schemas import ApprovalDecision, ApprovalRead
+from app.schemas.approval import ApprovalStatus
 from app.services.approval_service import ApprovalConflict, ApprovalService
 
 router = APIRouter(prefix="/api/v1/approvals", tags=["approvals"])
@@ -22,7 +22,7 @@ async def _enrich(session: AsyncSession, approvals: list[Approval]) -> list[Appr
 
 
 @router.get("", response_model=list[ApprovalRead])
-async def list_approvals(status: Literal["pending", "approved", "rejected", "expired"] = Query(default="pending"),
+async def list_approvals(status: ApprovalStatus = Query(default="pending"),
                          session: AsyncSession = Depends(get_async_session)):
     rows = (await session.execute(select(Approval).where(Approval.status == status).order_by(Approval.requested_at.desc()).limit(200))).scalars().all()
     return await _enrich(session, list(rows))

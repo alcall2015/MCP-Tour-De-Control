@@ -84,7 +84,7 @@ class AgentService:
             select(AgentTask.id).where(AgentTask.agent_id == agent_id, AgentTask.status.in_(OPEN_STATUSES)).limit(1)
         )).scalar_one_or_none()
         if open_task:
-            raise AgentStateError(409, "Agent has a queued or running task; cancel it first")
+            raise AgentStateError(409, "Agent has an open task; cancel it first")
 
     @staticmethod
     async def task_summaries(session: AsyncSession, agent_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:

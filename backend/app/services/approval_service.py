@@ -178,6 +178,37 @@ class ApprovalService:
         return count
 
     @staticmethod
+    async def reap_orphaned_waiting(session: AsyncSession) -> int:
+        """Fail any `waiting_approval` task whose approval is gone without a
+        trace to resume from (e.g. the process crashed between `decide()`
+        writing the decision and the runner consuming it, or between `park()`
+        and `request()` committing the approval row in some earlier bug)."""
+        task_ids = (await session.execute(
+            select(AgentTask.id).where(AgentTask.status == "waiting_approval")
+        )).scalars().all()
+        count = 0
+        for tid in task_ids:
+            try:
+                task = await session.get(AgentTask, tid)
+                if task is None or task.status != "waiting_approval":
+                    continue
+                pending = (await session.execute(
+                    select(Approval.id).where(Approval.task_id == tid, Approval.status == "pending").limit(1)
+                )).scalar_one_or_none()
+                if pending is not None:
+                    continue
+                if await ApprovalService.decided_unconsumed(session, tid) is not None:
+                    continue
+                await AgentTaskService.record_step(session, task, "error", {"message": "approval lost", "phase": "approval"})
+                if await AgentTaskService.finish(session, task, "failed", error="approval lost"):
+                    log.warning("approval_orphaned_task_reaped", task_id=str(tid))
+                    count += 1
+            except Exception:
+                log.exception("approval_reap_failed", task_id=str(tid))
+                await session.rollback()
+        return count
+
+    @staticmethod
     async def list_pending(session: AsyncSession) -> list[Approval]:
         return list((await session.execute(
             select(Approval).where(Approval.status == "pending").order_by(Approval.requested_at)

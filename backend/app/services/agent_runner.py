@@ -21,7 +21,7 @@ from app.models.agent_task import OPEN_STATUSES
 from app.models.tool_policy import DEFAULT_RISK_LEVEL
 from app.services.agent_task_service import AgentTaskService
 from app.services.approval_notifier import ApprovalNotifier
-from app.services.approval_service import ApprovalConflict, ApprovalService
+from app.services.approval_service import ApprovalConflict, ApprovalService, canonical_hash
 from app.services.llm_runtime import LlmResult, build_tool_defs, call_llm, call_mcp_tool
 from app.services.tool_policy_service import ToolPolicyService
 from app.utils.crypto import decrypt_value
@@ -218,7 +218,10 @@ class _Run:
             self.provider, self.model, self.api_key = config.llm_provider, config.llm_model, decrypt_value(config.api_key)
             servers = [s for s in agent.mcp_servers if s.enabled]
             self.tools, self.server_map = await self.tool_defs(servers)
-            self.levels = await self.policy_levels(session, self.server_map)
+            try:
+                self.levels = await self.policy_levels(session, self.server_map)
+            except Exception as exc:  # noqa: BLE001 - surfaced as a clean claim-phase failure
+                raise RunFailed("claim", f"tool policies unavailable: {exc}")
             self.ceiling = agent.max_auto_risk
             self.started = self.clock()
             self.deadline = self.started + task.timeout_seconds
@@ -275,14 +278,19 @@ class _Run:
 
     async def _resume(self, session, task, approval):
         """Continue after an operator decision: rebuild the history from the journal, no LLM call."""
+        if await AgentTaskService.is_cancel_requested(session, self.task_id):
+            raise Cancelled()
         steps = (await session.execute(select(AgentTaskStep).where(AgentTaskStep.task_id == task.id).order_by(AgentTaskStep.seq))).scalars().all()
         self.messages, turn_seq, rounds, tool_calls = _rebuild_history(steps)
         plan = task.plan
         if plan is None or turn_seq is None or approval.call_index >= len(tool_calls):
             raise RunFailed("resume", "journal has no plan or no turn to resume from")
+        gated_call = tool_calls[approval.call_index]
+        if gated_call["name"] != approval.tool_name or canonical_hash(gated_call["args"]) != approval.args_hash:
+            raise RunFailed("resume", "approval does not match the journal call")
         await AgentTaskService.heartbeat(session, task.id)
         # Apply the decision to its call, then re-gate the rest of that turn.
-        await self._execute_call(session, task, turn_seq, approval.call_index, tool_calls[approval.call_index], approval=approval)
+        await self._execute_call(session, task, turn_seq, approval.call_index, gated_call, approval=approval)
         for i in range(approval.call_index + 1, len(tool_calls)):
             await self._execute_call(session, task, turn_seq, i, tool_calls[i])
         await self._loop(session, task, rounds=rounds)

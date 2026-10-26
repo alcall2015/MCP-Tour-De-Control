@@ -31,19 +31,31 @@ def test_extract_messages_tolerates_shapes():
     assert extract_messages(json.dumps([{"body": "z"}]))[0]["timestamp"] is None
 
 
-async def _pending(session):
+async def _setup_whatsapp(session) -> McpServer:
+    """One-time WhatsApp server + Config, shared by every approval created in a test."""
     wa = McpServer(name="Whatsapp (OpenWa)", transport="http", url="http://wa", enabled=True)
     srv = McpServer(name="srv", transport="http", url="http://x", enabled=True)
     session.add_all([wa, srv])
     await session.commit()
     session.add(Config(llm_provider="openai", llm_model="m", api_key="", approval_whatsapp_enabled=True, approval_whatsapp_session_id="s1"))
-    agent = Agent(name="Bot", objective="o", status="active", mcp_servers=[srv])
+    await session.commit()
+    return srv
+
+
+async def _pending_approval(session, srv: McpServer, *, name: str = "Bot") -> Approval:
+    """One pending approval on a fresh agent/task, reusing an already set-up WhatsApp server."""
+    agent = Agent(name=name, objective="o", status="active", mcp_servers=[srv])
     session.add(agent)
     await session.commit()
     await AgentTaskService.enqueue(session, agent, objective=None, trigger="manual")
     task = await AgentTaskService.claim(session, "w")
     await AgentTaskService.record_step(session, task, "turn", {"text": None, "tool_calls": [{"name": "write_x", "args": {}}]})
     return await ApprovalService.request(session, task, step_seq=1, call_index=0, tool_name="write_x", server_name="srv", args={}, risk_level=2)
+
+
+async def _pending(session) -> Approval:
+    srv = await _setup_whatsapp(session)
+    return await _pending_approval(session, srv)
 
 
 def tool_returning(messages):
@@ -98,6 +110,36 @@ async def test_poll_skips_when_nothing_pending_or_disabled(session):
     await ApprovalService.decide(session, approval, approve=True, decided_by="ui", reason=None)
     tool = tool_returning([])
     assert await ApprovalReplies.poll(session, tool=tool) == 0 and tool.seen == []
+
+
+async def test_poll_tolerates_an_approval_expired_out_of_band_before_it_is_decided(session):
+    """Regression for the MissingGreenlet crash: `decide()`'s conflict branch
+    rolls back the session, which expires every ORM instance still held by
+    it, including the other pending approval `poll()` is about to process
+    next. The fix re-loads each approval fresh right before deciding it,
+    instead of reusing the instance captured when `pending` was first read.
+
+    `first` is expired directly on the row (as the expiry job would) inside
+    the `MessageList` tool call, i.e. after `list_pending()` already captured
+    it as pending but before the reply loop reaches its message — the exact
+    window the original code got wrong."""
+    srv = await _setup_whatsapp(session)
+    first = await _pending_approval(session, srv, name="Bot1")
+    second = await _pending_approval(session, srv, name="Bot2")
+    later = datetime.now(timezone.utc) + timedelta(seconds=5)
+    messages = [
+        {"body": f"OUI {first.code}", "fromMe": False, "timestamp": ts(later)},
+        {"body": f"OUI {second.code}", "fromMe": False, "timestamp": ts(later)},
+    ]
+
+    async def tool(name, args, server):
+        first.status = "expired"
+        await session.commit()
+        return json.dumps(messages)
+
+    assert await ApprovalReplies.poll(session, tool=tool) == 1
+    await session.refresh(second)
+    assert second.status == "approved"
 
 
 async def test_poll_returns_zero_when_session_lookup_fails(session):

@@ -214,6 +214,24 @@ async def test_park_conflict_when_task_already_finished_exits_quietly(setup_db, 
     assert task.status == "failed" and task.error == "finished early"
 
 
+async def test_resume_with_a_tampered_approval_fails_without_calling_the_tool_again(setup_db, session):
+    factory = factory_of(setup_db)
+    agent, task = await setup(session, ceiling=1)
+    tool = recording_tool()
+    await run_task(task.id, llm=scripted(J(PLAN), TWO_CALLS), tool=tool, tool_defs=fake_tool_defs, policy_levels=fake_levels, session_factory=factory)
+    await session.refresh(task)
+    approval = (await session.execute(select(Approval))).scalar_one()
+    # Simulate the approval row having drifted from the journal call it was requested for.
+    approval.tool_name = "purge_x"
+    await session.commit()
+    await ApprovalService.decide(session, approval, approve=True, decided_by="ui", reason=None)
+    await AgentTaskService.claim(session, "w2")
+    await run_task(task.id, llm=scripted(), tool=tool, tool_defs=fake_tool_defs, policy_levels=fake_levels, session_factory=factory)
+    await session.refresh(task)
+    assert task.status == "failed" and task.error.startswith("resume:")
+    assert [c[0] for c in tool.calls] == ["list_x"]              # write_x was never called a second time
+
+
 async def test_resume_without_a_decision_fails_cleanly(setup_db, session):
     factory = factory_of(setup_db)
     agent, task = await setup(session, ceiling=1)

@@ -50,7 +50,7 @@ class AgentTaskService:
             select(AgentTask.id).where(AgentTask.agent_id == agent.id, AgentTask.status.in_(OPEN_STATUSES)).limit(1)
         )).scalar_one_or_none()
         if open_task:
-            raise TaskConflict("Agent already has a queued or running task")
+            raise TaskConflict("Agent already has an open task")
         task = AgentTask(
             agent_id=agent.id, trigger=trigger,
             objective=(objective or "").strip() or agent.objective,
@@ -68,7 +68,7 @@ class AgentTaskService:
         except IntegrityError as exc:
             name = getattr(getattr(exc, "orig", None), "constraint_name", None) or ""
             if name == "uq_agent_task_open_per_agent" or "uq_agent_task_open_per_agent" in str(exc):
-                raise TaskConflict("Agent already has a queued or running task")
+                raise TaskConflict("Agent already has an open task")
             raise
         await _notify(session, QUEUED_CHANNEL, str(task.id))
         await session.commit()
@@ -207,6 +207,12 @@ class AgentTaskService:
         await _notify_event(session, task, None)
         await session.commit()
         log.info("agent_task_finished", task_id=str(task.id), status=status, outcome=outcome)
+        # Local import: approval_service imports this module. A task can only
+        # have a pending approval while waiting_approval, so this is a no-op
+        # for every other final status; its own commit is deliberately kept
+        # separate from the one above.
+        from app.services.approval_service import ApprovalService
+        await ApprovalService.expire_for_task(session, task.id, decided_by="system:cancel")
         return True
 
     @staticmethod
@@ -250,10 +256,7 @@ class AgentTaskService:
         if task.status in FINAL_STATUSES:
             raise TaskConflict(f"Task is already {task.status}")
         if task.status in ("queued", "waiting_approval"):
-            await AgentTaskService.finish(session, task, "cancelled")
-            # Local import: approval_service imports this module.
-            from app.services.approval_service import ApprovalService
-            await ApprovalService.expire_for_task(session, task.id, decided_by="system:cancel")
+            await AgentTaskService.finish(session, task, "cancelled")  # also expires any pending approval
             return
         task.cancel_requested = True
         await session.commit()
