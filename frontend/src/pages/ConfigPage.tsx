@@ -1,3 +1,4 @@
+import { ApprovalsConfig } from "../components/Config/ApprovalsConfig";
 import { GoogleConfig } from "../components/Config/GoogleConfig";
 import { LlmConfig } from "../components/Config/LlmConfig";
 import { McpServerList } from "../components/Config/McpServerList";
@@ -22,6 +23,7 @@ export function ConfigPage() {
       </div>
       <LlmConfig />
       <GoogleConfig />
+      <ApprovalsConfig />
       <McpServerList />
     </div>
   );
