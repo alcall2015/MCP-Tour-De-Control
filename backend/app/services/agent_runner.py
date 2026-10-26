@@ -20,6 +20,7 @@ from app.models import Agent, AgentTask, AgentTaskStep, Approval, Config
 from app.models.agent_task import OPEN_STATUSES
 from app.models.tool_policy import DEFAULT_RISK_LEVEL
 from app.services.agent_task_service import AgentTaskService
+from app.services.approval_notifier import ApprovalNotifier
 from app.services.approval_service import ApprovalConflict, ApprovalService
 from app.services.llm_runtime import LlmResult, build_tool_defs, call_llm, call_mcp_tool
 from app.services.tool_policy_service import ToolPolicyService
@@ -361,7 +362,7 @@ def _looks_like_error(text: str) -> bool:
 
 
 async def run_task(task_id: uuid.UUID, *, llm=call_llm, tool=call_mcp_tool, tool_defs=build_tool_defs,
-                   policy_levels=ToolPolicyService.levels_for, notify=None,
+                   policy_levels=ToolPolicyService.levels_for, notify=ApprovalNotifier.notify,
                    session_factory=async_session, clock=time.monotonic) -> None:
     run = _Run(task_id, llm, tool, tool_defs, policy_levels, session_factory, clock)
     try:

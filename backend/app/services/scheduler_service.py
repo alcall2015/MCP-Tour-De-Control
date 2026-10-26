@@ -114,6 +114,30 @@ async def _execute_agent_cron(agent_id: str):
         log.error("Agent cron tick failed", agent_id=agent_id, error=str(exc))
 
 
+async def _execute_approval_expiry():
+    from app.database import async_session
+    from app.services.approval_service import ApprovalService
+    try:
+        async with async_session() as session:
+            expired = await ApprovalService.expire_due(session)
+        if expired:
+            log.info("approvals_expired", count=expired)
+    except Exception as exc:
+        log.error("Approval expiry failed", error=str(exc))
+
+
+async def _execute_approval_replies():
+    from app.database import async_session
+    from app.services.approval_replies import ApprovalReplies
+    try:
+        async with async_session() as session:
+            decided = await ApprovalReplies.poll(session)
+        if decided:
+            log.info("approvals_decided_by_whatsapp", count=decided)
+    except Exception as exc:
+        log.error("Approval reply poll failed", error=str(exc))
+
+
 class SchedulerService:
     def __init__(self, use_db_jobstore: bool = True):
         jobstores = {}
@@ -265,6 +289,16 @@ class SchedulerService:
 
     def set_pair_call_job(self):
         self.scheduler.add_job(_execute_sim_pair_calls, trigger=self._interval_trigger(self.PAIR_CALL_JOB_ID), id=self.PAIR_CALL_JOB_ID, replace_existing=True)
+
+    APPROVAL_EXPIRY_JOB_ID = "approval_expiry"
+    APPROVAL_REPLIES_JOB_ID = "approval_replies"
+
+    def set_approval_jobs(self):
+        # One-minute cadence, offset so the two never fire on the same tick.
+        for job_id, fn, offset in ((self.APPROVAL_EXPIRY_JOB_ID, _execute_approval_expiry, 20),
+                                   (self.APPROVAL_REPLIES_JOB_ID, _execute_approval_replies, 40)):
+            self.scheduler.add_job(fn, trigger=IntervalTrigger(minutes=1, start_date=datetime.now(timezone.utc) + timedelta(seconds=offset)),
+                                   id=job_id, replace_existing=True)
 
 
 def is_valid_cron(cron_expr: str) -> bool:
