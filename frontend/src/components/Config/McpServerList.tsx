@@ -9,7 +9,7 @@ import {
 } from "../../lib/api";
 import type { McpServerCreate, McpTestResult } from "../../lib/api";
 import { McpServerForm } from "./McpServerForm";
-import { McpToolsPreview } from "./McpToolsPreview";
+import { McpToolsPanel } from "./McpToolsPanel";
 import { Spinner } from "../ui/Spinner";
 
 export function McpServerList() {
@@ -22,6 +22,7 @@ export function McpServerList() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, McpTestResult>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [toolsOpenId, setToolsOpenId] = useState<string | null>(null);
 
   const createMut = useMutation({
     mutationFn: createMcpServer,
@@ -50,6 +51,10 @@ export function McpServerList() {
     try {
       const result = await testMcpServer(id);
       setTestResults((prev) => ({ ...prev, [id]: result }));
+      if (result.success) {
+        queryClient.invalidateQueries({ queryKey: ["mcp-server-tools", id] });
+        setToolsOpenId(id);
+      }
     } finally {
       setTestingId(null);
     }
@@ -160,6 +165,18 @@ export function McpServerList() {
                     </div>
                     <div className="flex gap-1.5 flex-shrink-0">
                       <button
+                        onClick={() => setToolsOpenId((cur) => (cur === server.id ? null : server.id))}
+                        className="rounded-lg px-2.5 py-1 text-xs font-medium transition-all duration-150"
+                        aria-expanded={toolsOpenId === server.id}
+                        style={{
+                          backgroundColor: "var(--bg-panel)",
+                          color: "var(--text-secondary)",
+                          border: "1px solid var(--border)",
+                        }}
+                      >
+                        {toolsOpenId === server.id ? "Hide tools" : "Tools"}
+                      </button>
+                      <button
                         onClick={() => handleTest(server.id)}
                         disabled={testingId === server.id}
                         className="rounded-lg px-2.5 py-1 text-xs font-medium transition-all duration-150 disabled:opacity-50"
@@ -203,7 +220,10 @@ export function McpServerList() {
 
                   {testResults[server.id] &&
                     (testResults[server.id].success ? (
-                      <McpToolsPreview tools={testResults[server.id].tools} />
+                      <p className="mt-2 text-xs" style={{ color: "var(--success)" }}>
+                        Connected · {testResults[server.id].tools.length} tool
+                        {testResults[server.id].tools.length !== 1 ? "s" : ""} discovered
+                      </p>
                     ) : (
                       <p
                         className="mt-2 rounded-lg px-3 py-2 text-xs"
@@ -216,6 +236,9 @@ export function McpServerList() {
                         {testResults[server.id].error}
                       </p>
                     ))}
+                  {toolsOpenId === server.id && (
+                    <McpToolsPanel serverId={server.id} serverName={server.name} />
+                  )}
                 </>
               )}
             </div>
