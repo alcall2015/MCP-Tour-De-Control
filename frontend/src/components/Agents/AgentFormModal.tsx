@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createAgent, listMcpServers, updateAgent } from "../../lib/api";
-import type { Agent, AgentCreate } from "../../lib/api";
+import { createAgent, listMcpServers, RISK_LEVELS, updateAgent } from "../../lib/api";
+import type { Agent, AgentCreate, RiskLevel } from "../../lib/api";
 import { Modal } from "../ui/Modal";
 import { MutationError } from "../ui/MutationError";
 import { CronPicker } from "../Prompts/CronPicker";
@@ -28,6 +28,7 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
   const [serverIds, setServerIds] = useState<string[]>([]);
   const [maxSteps, setMaxSteps] = useState<number>(LIMITS.steps.def);
   const [timeoutSeconds, setTimeoutSeconds] = useState<number>(LIMITS.timeout.def);
+  const [maxAutoRisk, setMaxAutoRisk] = useState<RiskLevel>(1);
   const [scheduled, setScheduled] = useState(false);
   const [cronExpr, setCronExpr] = useState("0 8 * * *");
 
@@ -41,6 +42,7 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
     setServerIds(agent?.mcp_servers.map((s) => s.id) ?? []);
     setMaxSteps(agent?.max_steps ?? LIMITS.steps.def);
     setTimeoutSeconds(agent?.timeout_seconds ?? LIMITS.timeout.def);
+    setMaxAutoRisk(agent?.max_auto_risk ?? 1);
     setScheduled(Boolean(agent?.cron_expr));
     setCronExpr(agent?.cron_expr ?? "0 8 * * *");
   }, [open, agent]);
@@ -69,6 +71,7 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
       description: description.trim(),
       max_steps: maxSteps,
       timeout_seconds: timeoutSeconds,
+      max_auto_risk: maxAutoRisk,
       mcp_server_ids: serverIds,
       cron_expr: scheduled ? cronExpr : null,
     });
@@ -114,6 +117,14 @@ export function AgentFormModal({ open, agent, onClose }: Props) {
               ))}
             </div>
           )}
+        </div>
+
+        <div>
+          <label className={labelClass} style={labelStyle}>Automatic up to</label>
+          <select className="input-field" value={maxAutoRisk} onChange={(e) => setMaxAutoRisk(Number(e.target.value) as RiskLevel)}>
+            {RISK_LEVELS.filter((r) => r.level <= 2).map((r) => <option key={r.level} value={r.level}>{r.code} · {r.label}</option>)}
+          </select>
+          <p className="mt-1 text-xs" style={labelStyle}>Tools at or below this level run on their own; anything above waits for your approval. R3 tools always wait. Levels are set per server in Settings.</p>
         </div>
 
         <div>

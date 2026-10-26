@@ -6,6 +6,7 @@ import type { Agent, AgentStatus } from "../../lib/api";
 import { MutationError } from "../ui/MutationError";
 import { AgentTaskRow } from "./AgentTaskRow";
 import { OutcomeBadge, TaskStatusBadge } from "./AgentTaskBadges";
+import { RiskBadge } from "./RiskBadge";
 import { relativeTime } from "./time";
 
 interface Props {
@@ -89,6 +90,7 @@ export function AgentCard({ agent, busy, error, onEdit, onStatus, onDelete, onRu
             </span>
           ))
         )}
+        <span className="flex items-center gap-1">auto ≤ <RiskBadge level={agent.max_auto_risk} compact /></span>
         <span className="font-mono">{agent.max_steps} steps · {agent.timeout_seconds} s</span>
         <span className="ml-auto">Updated {updated}</span>
       </div>
