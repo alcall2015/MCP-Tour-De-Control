@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models import McpServer
-from app.schemas import McpServerCreate, McpServerRead, McpServerUpdate, McpTestResult
+from app.schemas import McpServerCreate, McpServerRead, McpServerUpdate, McpTestResult, ToolPolicyRead, ToolPolicyUpdate
 from app.services.mcp_service import McpService
+from app.services.tool_policy_service import ToolDiscoveryError, ToolPolicyService
 from app.utils.crypto import encrypt_value
 
 router = APIRouter(prefix="/api/v1/mcp-servers", tags=["mcp-servers"])
@@ -82,4 +83,30 @@ async def test_server(server_id: uuid.UUID, session: AsyncSession = Depends(get_
     server = await session.get(McpServer, server_id)
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
-    return await McpService.test_connection(server)
+    result = await McpService.test_connection(server)
+    if result.success:
+        await ToolPolicyService.sync(session, server, [t.model_dump() for t in result.tools])
+    return result
+
+
+@router.get("/{server_id}/tools", response_model=list[ToolPolicyRead])
+async def list_server_tools(server_id: uuid.UUID, session: AsyncSession = Depends(get_async_session)):
+    server = await session.get(McpServer, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    try:
+        return await ToolPolicyService.discover(session, server)
+    except ToolDiscoveryError as exc:
+        raise HTTPException(status_code=502, detail=f"Tool discovery failed: {exc.detail}")
+
+
+@router.put("/{server_id}/tools/{tool_name}", response_model=ToolPolicyRead)
+async def set_tool_policy(server_id: uuid.UUID, tool_name: str, data: ToolPolicyUpdate, session: AsyncSession = Depends(get_async_session)):
+    server = await session.get(McpServer, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    try:
+        row = await ToolPolicyService.set_level(session, server, tool_name, data.risk_level)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return ToolPolicyRead(name=row.tool_name, description=row.description, risk_level=row.risk_level)
