@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("ENCRYPTION_KEY", "LOHFyasyawfKr9DJJpfITXBzO33W_ID2O64CkB5jom8=")
 
+from sqlalchemy import select
+
 from app.models import Agent, AgentTask, Approval, Config, McpServer
 from app.services.agent_task_service import AgentTaskService
 from app.services.approval_replies import ApprovalReplies, extract_messages, parse_reply
@@ -96,3 +98,16 @@ async def test_poll_skips_when_nothing_pending_or_disabled(session):
     await ApprovalService.decide(session, approval, approve=True, decided_by="ui", reason=None)
     tool = tool_returning([])
     assert await ApprovalReplies.poll(session, tool=tool) == 0 and tool.seen == []
+
+
+async def test_poll_returns_zero_when_session_lookup_fails(session):
+    approval = await _pending(session)
+    cfg = (await session.execute(select(Config))).scalar_one()
+    cfg.approval_whatsapp_session_id = None
+    await session.commit()
+
+    async def tool(name, args, server):
+        return json.dumps({"error": "boom-from-session-find-all"})
+    assert await ApprovalReplies.poll(session, tool=tool) == 0
+    await session.refresh(approval)
+    assert approval.status == "pending"

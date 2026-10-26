@@ -70,7 +70,11 @@ class ApprovalReplies:
         server = await resolve_whatsapp_server(session, config)
         if server is None:
             return 0
-        session_id = await resolve_session_id(config, server, tool)
+        try:
+            session_id = await resolve_session_id(config, server, tool)
+        except Exception as exc:  # noqa: BLE001 - a flaky bridge must not turn the poll into an error
+            log.warning("approval_replies_session_lookup_failed", error=str(exc))
+            return 0
         if not session_id:
             return 0
         chat_id = admin_chat_id(config.approval_whatsapp_number)
