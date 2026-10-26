@@ -176,3 +176,21 @@ async def test_events_stream_live_steps_until_final(setup_test_db):
     assert names[0] == "status" and names[-1] == "done"
     assert [d["kind"] for e, d in events if e == "step"] == ["turn", "report"]
     assert any(e == "status" and d["status"] == "completed" for e, d in events)
+
+
+async def test_cancel_waiting_task_closes_its_approval(setup_test_db):
+    from app.models import Config
+    from app.services.approval_service import ApprovalService
+    aid = await make_agent(setup_test_db)
+    async with setup_test_db() as s:
+        s.add(Config(llm_provider="openai", llm_model="m", api_key=""))
+        await s.commit()
+        agent = await s.get(Agent, uuid.UUID(aid))
+        await AgentTaskService.enqueue(s, agent, objective=None, trigger="manual")
+        task = await AgentTaskService.claim(s, "w")
+        await AgentTaskService.record_step(s, task, "turn", {"text": None, "tool_calls": [{"name": "t", "args": {}}]})
+        approval = await ApprovalService.request(s, task, step_seq=1, call_index=0, tool_name="t", server_name="s", args={}, risk_level=2)
+    async with client() as c:
+        resp = await c.post(f"/api/v1/agent-tasks/{task.id}/cancel")
+        assert resp.status_code == 202 and resp.json()["status"] == "cancelled"
+        assert (await c.get(f"/api/v1/approvals?status=expired")).json()[0]["id"] == str(approval.id)

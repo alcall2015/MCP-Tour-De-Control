@@ -4,9 +4,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-AgentTaskStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+from app.schemas.approval import ApprovalRead
+
+AgentTaskStatus = Literal["queued", "running", "waiting_approval", "completed", "failed", "cancelled"]
 AgentOutcome = Literal["success", "partial", "failed"]
-StepKind = Literal["plan", "turn", "tool_call", "critique", "report", "error"]
+StepKind = Literal["plan", "turn", "tool_call", "critique", "report", "error", "approval_requested"]
 
 
 class AgentTaskCreate(BaseModel):
@@ -56,3 +58,4 @@ class AgentTaskStepDetail(AgentTaskStepRead):
 
 class AgentTaskDetail(AgentTaskRead):
     steps: list[AgentTaskStepRead]
+    approval: ApprovalRead | None = None

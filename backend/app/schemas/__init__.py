@@ -1,4 +1,5 @@
 from app.schemas.agent import AgentServerRef, AgentCreate, AgentUpdate, AgentStatusUpdate, AgentRead, AgentTaskSummary
+from app.schemas.approval import ApprovalRead, ApprovalDecision
 from app.schemas.agent_task import AgentTaskCreate, AgentTaskRead, AgentTaskStepRead, AgentTaskStepDetail, AgentTaskDetail
 from app.schemas.config import ConfigRead, ConfigUpdate
 from app.schemas.mcp_server import McpServerCreate, McpServerRead, McpServerUpdate, McpTestResult, McpToolInfo
@@ -14,6 +15,7 @@ from app.schemas.sms_reply import SmsReplyRead, SmsReplyPage, SmsAutoReplyStats
 
 __all__ = [
     "AgentServerRef", "AgentCreate", "AgentUpdate", "AgentStatusUpdate", "AgentRead", "AgentTaskSummary",
+    "ApprovalRead", "ApprovalDecision",
     "AgentTaskCreate", "AgentTaskRead", "AgentTaskStepRead", "AgentTaskStepDetail", "AgentTaskDetail",
     "ConfigRead", "ConfigUpdate",
     "McpServerCreate", "McpServerRead", "McpServerUpdate", "McpTestResult", "McpToolInfo",

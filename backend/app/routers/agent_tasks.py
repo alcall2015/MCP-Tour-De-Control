@@ -11,9 +11,9 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.database import async_session, get_async_session
-from app.models import AgentTask, AgentTaskStep
+from app.models import AgentTask, AgentTaskStep, Approval
 from app.models.agent_task import FINAL_STATUSES
-from app.schemas import AgentTaskDetail, AgentTaskRead, AgentTaskStepDetail, AgentTaskStepRead
+from app.schemas import AgentTaskDetail, AgentTaskRead, AgentTaskStepDetail, AgentTaskStepRead, ApprovalRead
 from app.services.agent_task_service import AgentTaskService, EVENTS_CHANNEL, TaskConflict
 from app.utils.sse import sse_frame
 
@@ -32,7 +32,14 @@ async def _get_task(session: AsyncSession, task_id: uuid.UUID, *, with_steps: bo
 
 @router.get("/{task_id}", response_model=AgentTaskDetail)
 async def get_task(task_id: uuid.UUID, session: AsyncSession = Depends(get_async_session)):
-    return AgentTaskDetail.model_validate(await _get_task(session, task_id, with_steps=True))
+    task = await _get_task(session, task_id, with_steps=True)
+    pending = (await session.execute(
+        select(Approval).where(Approval.task_id == task.id, Approval.status == "pending")
+        .order_by(Approval.requested_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    detail = AgentTaskDetail.model_validate(task)
+    detail.approval = ApprovalRead.from_model(pending) if pending else None
+    return detail
 
 
 @router.get("/{task_id}/steps/{seq}", response_model=AgentTaskStepDetail)
