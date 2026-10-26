@@ -74,6 +74,12 @@ def _to_read(config: Config) -> ConfigRead:
         pairing_call_min_seconds=config.pairing_call_min_seconds,
         pairing_call_max_seconds=config.pairing_call_max_seconds,
         pairing_call_max_per_run=config.pairing_call_max_per_run,
+        approval_expiry_hours=config.approval_expiry_hours,
+        approval_whatsapp_enabled=config.approval_whatsapp_enabled,
+        approval_whatsapp_number=config.approval_whatsapp_number,
+        approval_whatsapp_server_id=config.approval_whatsapp_server_id,
+        approval_whatsapp_session_id=config.approval_whatsapp_session_id,
+        approval_whatsapp_template=config.approval_whatsapp_template,
         updated_at=config.updated_at,
     )
 
@@ -93,6 +99,8 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
             status_code=422,
             detail=f"Invalid cron expression for activity_cron: {data.activity_cron!r}",
         )
+    if data.approval_whatsapp_template is not None and "{code}" not in data.approval_whatsapp_template:
+        raise HTTPException(status_code=422, detail="approval_whatsapp_template must contain {code}")
 
     config = await _get_or_create_config(session)
     if data.llm_provider is not None:
@@ -229,6 +237,19 @@ async def update_config(data: ConfigUpdate, session: AsyncSession = Depends(get_
         if not 1 <= data.pairing_call_max_per_run <= 20:
             raise HTTPException(status_code=422, detail="pairing_call_max_per_run must be between 1 and 20")
         config.pairing_call_max_per_run = data.pairing_call_max_per_run
+
+    if data.approval_expiry_hours is not None:
+        config.approval_expiry_hours = data.approval_expiry_hours
+    if data.approval_whatsapp_enabled is not None:
+        config.approval_whatsapp_enabled = data.approval_whatsapp_enabled
+    if data.approval_whatsapp_number is not None:
+        config.approval_whatsapp_number = data.approval_whatsapp_number
+    if "approval_whatsapp_server_id" in data.model_fields_set:
+        config.approval_whatsapp_server_id = data.approval_whatsapp_server_id
+    if "approval_whatsapp_session_id" in data.model_fields_set:
+        config.approval_whatsapp_session_id = data.approval_whatsapp_session_id
+    if data.approval_whatsapp_template is not None:
+        config.approval_whatsapp_template = data.approval_whatsapp_template
 
     await session.commit()
     await session.refresh(config)

@@ -59,7 +59,7 @@ class AgentService:
     async def apply_update(session: AsyncSession, agent: Agent, data: AgentUpdate, servers_loader) -> Agent:
         if agent.status == "archived":
             raise AgentStateError(409, "Agent is archived; restore it before editing")
-        for field in ("name", "objective", "instructions", "description", "max_steps", "timeout_seconds"):
+        for field in ("name", "objective", "instructions", "description", "max_steps", "timeout_seconds", "max_auto_risk"):
             value = getattr(data, field)
             if value is not None:
                 setattr(agent, field, value)

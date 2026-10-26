@@ -370,3 +370,16 @@ async def test_create_with_invalid_cron_is_422_and_valid_cron_round_trips():
         assert data["running_task_id"] is None and data["last_task"] is None
         resp = await c.put(f"/api/v1/agents/{data['id']}", json={"cron_expr": None})
         assert resp.status_code == 200 and resp.json()["cron_expr"] is None
+
+
+# ---- risk ceiling -----------------------------------------------------------
+
+async def test_max_auto_risk_defaults_updates_and_bounds():
+    async with client() as c:
+        data = await create_agent(c)
+        assert data["max_auto_risk"] == 1
+        resp = await c.put(f"/api/v1/agents/{data['id']}", json={"max_auto_risk": 2})
+        assert resp.status_code == 200 and resp.json()["max_auto_risk"] == 2
+        assert (await c.put(f"/api/v1/agents/{data['id']}", json={"max_auto_risk": 3})).status_code == 422
+        resp = await c.post("/api/v1/agents", json={"name": "x", "objective": "y", "mcp_server_ids": [], "max_auto_risk": 0})
+        assert resp.status_code == 201 and resp.json()["max_auto_risk"] == 0

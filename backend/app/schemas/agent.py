@@ -41,6 +41,7 @@ class AgentCreate(BaseModel):
     timeout_seconds: int = Field(default=300, ge=10, le=3600)
     mcp_server_ids: list[uuid.UUID] = []
     cron_expr: str | None = None
+    max_auto_risk: int = Field(default=1, ge=0, le=2)
 
     @field_validator("cron_expr")
     @classmethod
@@ -57,6 +58,7 @@ class AgentUpdate(BaseModel):
     timeout_seconds: int | None = Field(default=None, ge=10, le=3600)
     mcp_server_ids: list[uuid.UUID] | None = None  # replaces the whole set when present
     cron_expr: str | None = None
+    max_auto_risk: int | None = Field(default=None, ge=0, le=2)
 
     @field_validator("cron_expr")
     @classmethod
@@ -81,6 +83,7 @@ class AgentRead(BaseModel):
     updated_at: datetime
     mcp_servers: list[AgentServerRef]
     cron_expr: str | None
+    max_auto_risk: int
     running_task_id: uuid.UUID | None = None
     last_task: AgentTaskSummary | None = None
 

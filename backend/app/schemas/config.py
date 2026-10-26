@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConfigRead(BaseModel):
@@ -34,6 +34,12 @@ class ConfigRead(BaseModel):
     pairing_call_min_seconds: int
     pairing_call_max_seconds: int
     pairing_call_max_per_run: int
+    approval_expiry_hours: int
+    approval_whatsapp_enabled: bool
+    approval_whatsapp_number: str
+    approval_whatsapp_server_id: uuid.UUID | None
+    approval_whatsapp_session_id: str | None
+    approval_whatsapp_template: str
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -67,3 +73,9 @@ class ConfigUpdate(BaseModel):
     pairing_call_min_seconds: int | None = None
     pairing_call_max_seconds: int | None = None
     pairing_call_max_per_run: int | None = None
+    approval_expiry_hours: int | None = Field(default=None, ge=1, le=168)
+    approval_whatsapp_enabled: bool | None = None
+    approval_whatsapp_number: str | None = Field(default=None, pattern=r"^\+?\d{8,15}$")
+    approval_whatsapp_server_id: uuid.UUID | None = None
+    approval_whatsapp_session_id: str | None = None
+    approval_whatsapp_template: str | None = None

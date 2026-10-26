@@ -88,3 +88,21 @@ async def test_a_lookback_longer_than_the_recipient_cooldown_is_rejected():
         alone = await client.put("/api/v1/config", json={"sms_autoreply_recipient_cooldown_hours": 1})
         assert alone.status_code == 422
         assert "1440" in alone.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_approval_settings_round_trip(setup_test_db):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        before = (await c.get("/api/v1/config")).json()
+        assert before["approval_expiry_hours"] == 24 and before["approval_whatsapp_enabled"] is False
+        assert before["approval_whatsapp_number"] == "+2250700003331" and before["approval_whatsapp_server_id"] is None
+        resp = await c.put("/api/v1/config", json={"approval_expiry_hours": 48, "approval_whatsapp_enabled": True,
+                                                   "approval_whatsapp_number": "+22501020304", "approval_whatsapp_session_id": "sess-1",
+                                                   "approval_whatsapp_template": "Hi {agent} {code} {link}"})
+        assert resp.status_code == 200, resp.text
+        after = resp.json()
+        assert after["approval_expiry_hours"] == 48 and after["approval_whatsapp_enabled"] is True
+        assert after["approval_whatsapp_number"] == "+22501020304" and after["approval_whatsapp_session_id"] == "sess-1"
+        assert (await c.put("/api/v1/config", json={"approval_expiry_hours": 0})).status_code == 422
+        assert (await c.put("/api/v1/config", json={"approval_whatsapp_number": "abc"})).status_code == 422
+        assert (await c.put("/api/v1/config", json={"approval_whatsapp_template": "no code here"})).status_code == 422

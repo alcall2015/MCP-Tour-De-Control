@@ -34,6 +34,7 @@ def _to_read(agent: Agent, summary: dict | None = None) -> AgentRead:
         updated_at=agent.updated_at,
         mcp_servers=[AgentServerRef(id=s.id, name=s.name, enabled=s.enabled) for s in agent.mcp_servers],
         cron_expr=agent.cron_expr,
+        max_auto_risk=agent.max_auto_risk,
         running_task_id=summary.get("running_task_id"),
         last_task=summary.get("last_task"),
     )
@@ -84,6 +85,7 @@ async def create_agent(data: AgentCreate, session: AsyncSession = Depends(get_as
         timeout_seconds=data.timeout_seconds,
         mcp_servers=servers,
         cron_expr=data.cron_expr,
+        max_auto_risk=data.max_auto_risk,
     )
     session.add(agent)
     await session.commit()
