@@ -98,17 +98,23 @@ class ApprovalService:
             # capture any needed attributes (e.g. task.id) before calling us.
             status = (await session.execute(
                 select(Approval.status).where(Approval.id == approval.id)
-            )).scalar_one()
+            )).scalar_one_or_none()
             await session.rollback()
-            raise ApprovalConflict(f"Approval is already {status}")
+            raise ApprovalConflict(f"Approval is already {status or 'gone'}")
         await session.commit()
         await session.refresh(approval)
         log.info("approval_decided", approval_id=str(approval.id), status=new_status, decided_by=decided_by)
 
         task = await session.get(AgentTask, approval.task_id)
+        if task is not None:
+            # The identity map may hold this task from before it was parked
+            # (expire_on_commit=False): read the status from the database.
+            await session.refresh(task, ["status", "agent_id"])
         if task is None or task.status != "waiting_approval":
             return approval
         agent = await session.get(Agent, task.agent_id)
+        if agent is not None:
+            await session.refresh(agent, ["status"])
         if agent is None or agent.status != "active":
             await AgentTaskService.record_step(session, task, "error", {"message": "agent is not active", "phase": "approval"})
             await AgentTaskService.finish(session, task, "failed", error="agent is not active")
@@ -120,7 +126,7 @@ class ApprovalService:
     async def decided_unconsumed(session: AsyncSession, task_id: uuid.UUID) -> Approval | None:
         return (await session.execute(
             select(Approval).where(Approval.task_id == task_id, Approval.status.in_(("approved", "rejected")),
-                                   Approval.consumed_at.is_(None)).order_by(Approval.requested_at.desc()).limit(1)
+                                   Approval.consumed_at.is_(None)).order_by(Approval.requested_at.asc()).limit(1)
         )).scalar_one_or_none()
 
     @staticmethod

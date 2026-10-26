@@ -181,7 +181,9 @@ class _Run:
         server = self.server_map.get(tc["name"])
         level = self.levels.get(tc["name"], DEFAULT_RISK_LEVEL)
         t1 = self.clock()
-        payload = {"tool": tc["name"], "server": server.name if server else None, "args": tc["args"], "risk_level": level}
+        payload = {"tool": tc["name"], "server": server.name if server else None, "args": tc["args"],
+                   # On a resume the journal records the level the approval was granted against.
+                   "risk_level": approval.risk_level if approval is not None else level}
         if server is None:
             text, ok = json.dumps({"error": f"Unknown tool: {tc['name']}"}), False
         elif approval is not None and approval.status == "rejected":
